@@ -1,4 +1,4 @@
-# 安装、升级与卸载
+# 自动化多窗口项目总控：安装、升级与卸载
 
 ## 系统要求
 
@@ -26,7 +26,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File '.\install.ps1'
 5. 完全关闭并重新打开 Codex 桌面版，然后在新任务中输入：
 
 ```text
-使用 $codex-project-orchestrator 分析当前项目并生成多任务工作流。
+使用 $codex-project-orchestrator，让当前任务作为总控，自动协调多个 Codex 任务完成项目分析、开发、测试与审查。
 ```
 
 默认安装到 `$CODEX_HOME\skills`；未设置 `CODEX_HOME` 时安装到 `%USERPROFILE%\.codex\skills`。如需安装到测试目录，使用 `-DestinationRoot 'D:\指定目录\skills'`。

@@ -23,7 +23,7 @@ if (-not (Test-Path -LiteralPath (Join-Path $destination 'SKILL.md')) -or
     throw '目标目录缺少安装标识，拒绝卸载。'
 }
 
-if (-not $PSCmdlet.ShouldProcess($destination, '卸载 Codex 项目总控 Skill')) { return }
+if (-not $PSCmdlet.ShouldProcess($destination, '卸载自动化多窗口项目总控 Skill')) { return }
 
 [void](New-Item -ItemType Directory -Path $backupRoot -Force)
 $operationId = [guid]::NewGuid().ToString('N')
