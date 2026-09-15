@@ -26,12 +26,16 @@ if ($workflow.authorization -notin $validAuthorizations) { Add-ValidationError "
 if (-not [System.IO.Path]::IsPathRooted([string]$workflow.project_path)) { Add-ValidationError 'workflow.project_path must be absolute' }
 
 $taskIds = @{}
+$threadIds = @{}
 foreach ($task in $tasks) {
     $context = "task[$($task.task_id)]"
     foreach ($name in @('task_id','thread_id','host_id','role','status','depends_on','project_path','base_revision','allowed_files','objective','authorization','repair_count','updated_at')) { [void](Require-Property $task $name $context) }
     if ([string]::IsNullOrWhiteSpace($task.task_id)) { Add-ValidationError "$context task_id is empty" }
     elseif ($taskIds.ContainsKey($task.task_id)) { Add-ValidationError "duplicate task_id: $($task.task_id)" }
     else { $taskIds[$task.task_id] = $task }
+    if ([string]::IsNullOrWhiteSpace($task.thread_id)) { Add-ValidationError "$context thread_id is empty" }
+    elseif ($threadIds.ContainsKey($task.thread_id)) { Add-ValidationError "duplicate thread_id: $($task.thread_id)" }
+    else { $threadIds[$task.thread_id] = $true }
     if ($task.role -notin $validRoles) { Add-ValidationError "$context invalid role: $($task.role)" }
     if ($task.status -notin $validStates) { Add-ValidationError "$context invalid status: $($task.status)" }
     if ($task.authorization -notin $validAuthorizations) { Add-ValidationError "$context invalid authorization: $($task.authorization)" }
@@ -44,6 +48,14 @@ foreach ($task in $tasks) {
     foreach ($dependency in @($task.depends_on | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })) {
         if (-not $taskIds.ContainsKey([string]$dependency)) { Add-ValidationError "task[$($task.task_id)] dependency not found: $dependency" }
         elseif ($dependency -eq $task.task_id) { Add-ValidationError "task[$($task.task_id)] cannot depend on itself" }
+    }
+    if ($task.status -in @('dispatched','running','verifying','completed')) {
+        foreach ($dependency in @($task.depends_on | Where-Object { $_ })) {
+            if ($taskIds.ContainsKey([string]$dependency) -and ($taskIds[[string]$dependency].status -ne 'completed' -or ($taskIds[[string]$dependency].PSObject.Properties.Match('verified').Count -gt 0 -and -not $taskIds[[string]$dependency].verified))) { Add-ValidationError "task[$($task.task_id)] dependency is not verified complete: $dependency" }
+        }
+    }
+    if ($task.status -eq 'completed' -and $task.PSObject.Properties.Match('verified').Count -gt 0) {
+        if (-not $task.verified -or [string]::IsNullOrWhiteSpace($task.raw_result_path) -or [string]::IsNullOrWhiteSpace($task.normalized_result_path)) { Add-ValidationError "task[$($task.task_id)] completed without verified evidence" }
     }
 }
 

@@ -19,6 +19,7 @@ pairs = {
     "workflow": load_json(EXAMPLES / "workflow.json"),
     "task": load_json(EXAMPLES / "tasks.json")[0],
     "result": load_json(EXAMPLES / "result.json"),
+    "event": load_json(EXAMPLES / "event.json"),
 }
 
 for name, document in pairs.items():
@@ -36,4 +37,4 @@ except jsonschema.ValidationError:
 else:
     raise AssertionError("Invalid repair_count unexpectedly passed validation")
 
-print("SCHEMA VALID: 3 positive, 1 negative")
+print("SCHEMA VALID: 4 positive, 1 negative")

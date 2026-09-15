@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "event.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["sequence", "workflow_id", "type", "task_id", "from_status", "to_status", "reason", "created_at"],
+  "properties": {
+    "sequence": {"type": "integer", "minimum": 1},
+    "workflow_id": {"type": "string", "minLength": 1},
+    "type": {"enum": ["workflow_initialized", "task_registered", "task_transitioned"]},
+    "task_id": {"type": ["string", "null"]},
+    "from_status": {"type": ["string", "null"]},
+    "to_status": {"type": "string", "minLength": 1},
+    "reason": {"type": "string", "minLength": 1},
+    "created_at": {"type": "string", "format": "date-time"}
+  }
+}

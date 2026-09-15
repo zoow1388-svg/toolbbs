@@ -17,6 +17,10 @@
     "objective": {"type": "string", "minLength": 1},
     "authorization": {"enum": ["read-only", "plan-approved", "implementation-approved", "test-approved", "git-approved", "deployment-approved"]},
     "repair_count": {"type": "integer", "minimum": 0, "maximum": 1},
+    "dispatch_count": {"type": "integer", "minimum": 0, "maximum": 1},
+    "raw_result_path": {"type": ["string", "null"]},
+    "normalized_result_path": {"type": ["string", "null"]},
+    "verified": {"type": "boolean"},
     "updated_at": {"type": "string", "format": "date-time"}
   }
 }
