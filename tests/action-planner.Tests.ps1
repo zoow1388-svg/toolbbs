@@ -17,9 +17,14 @@ function Write-NormalizedResult([string]$Path,[string]$Project,[string]$Dispatch
     $value=[ordered]@{task_id='ANALYSIS-001';dispatch_id=$DispatchId;thread_id='thread-1';host_id='local';project_path=$Project;base_revision='unborn';end_revision='unborn';summary='done';preexisting_changes=@();changed_files=@();commands=@();checks=@();artifacts=@();unexecuted=@();blockers=@();risks=@();required_authorization=$null;created_at=(Get-Date).ToUniversalTime().ToString('o');normalization=[ordered]@{normalized_by='controller';source_thread_id='thread-1';source_message_id='result-1';source_format='text';decisions=@()}}
     [IO.File]::WriteAllText($Path,($value|ConvertTo-Json -Depth 10),[Text.UTF8Encoding]::new($false))
 }
+function Write-CallbackReceipt([string]$Project,[string]$TaskId){
+    $workflow=Get-Content (Join-Path $Project '.codex-orchestrator\workflow.json') -Raw -Encoding UTF8|ConvertFrom-Json;$task=Read-Task $Project $TaskId
+    $value=[ordered]@{type='completion_callback';event_id=$task.callback_event_id;workflow_id=$workflow.workflow_id;task_id=$task.task_id;dispatch_id=$task.dispatch_id;source_thread_id=$task.thread_id;source_host_id=$task.host_id;target_thread_id=$workflow.controller_thread_id;target_host_id=$workflow.controller_host_id;status='completed'}
+    $path=Join-Path $Project 'callback.json';[IO.File]::WriteAllText($path,($value|ConvertTo-Json -Compress),[Text.UTF8Encoding]::new($false));$path
+}
 
 Describe 'workflow action planner' {
-    BeforeEach{$project=Join-Path $TestDrive ([guid]::NewGuid().ToString('N'));New-Item -ItemType Directory $project|Out-Null;Invoke-Manager @('-Action','initialize','-ProjectPath',$project,'-WorkflowId','WF-001')|Should Be 0}
+    BeforeEach{$project=Join-Path $TestDrive ([guid]::NewGuid().ToString('N'));New-Item -ItemType Directory $project|Out-Null;Invoke-Manager @('-Action','initialize','-ProjectPath',$project,'-WorkflowId','WF-001','-ControllerThreadId','controller-1')|Should Be 0}
 
     It 'maps approval preparation and sending without executing them' {
         Invoke-Manager @('-Action','register','-ProjectPath',$project,'-TaskId','ANALYSIS-001','-ThreadId','thread-1','-Role','analyst','-Objective','analyze')|Should Be 0
@@ -37,6 +42,13 @@ Describe 'workflow action planner' {
         (Invoke-Tool $currentCheck @('-ProjectPath',$project,'-PlanPath',$path)).ExitCode|Should Be 0
         Invoke-Manager @('-Action','transition','-ProjectPath',$project,'-TaskId','ANALYSIS-001','-ToStatus','awaiting_approval','-Reason','changed')|Should Be 0
         (Invoke-Tool $currentCheck @('-ProjectPath',$project,'-PlanPath',$path)).ExitCode|Should Be 1
+    }
+
+    It 'stops dispatch planning until a controller identity is configured' {
+        Invoke-Manager @('-Action','register','-ProjectPath',$project,'-TaskId','ANALYSIS-001','-ThreadId','thread-1','-Role','analyst','-Objective','analyze')|Should Be 0;Approve-Task $project 'ANALYSIS-001'
+        $workflowPath=Join-Path $project '.codex-orchestrator\workflow.json';$workflow=Get-Content $workflowPath -Raw -Encoding UTF8|ConvertFrom-Json;$workflow.controller_thread_id=$null;$workflow.controller_host_id=$null
+        [IO.File]::WriteAllText($workflowPath,($workflow|ConvertTo-Json -Depth 20),[Text.UTF8Encoding]::new($false))
+        $plan=New-Plan $project (Join-Path $project 'missing-controller.json');$plan.actions[0].type|Should Be 'manual_review';$plan.actions[0].operation|Should Be 'configure_controller'
     }
 
     It 'batches nine waiting tasks into groups of at most eight' {
@@ -67,7 +79,12 @@ Describe 'workflow action planner' {
         $resultPlan=New-Plan $project (Join-Path $project 'normalize-plan.json');@($resultPlan.actions).Count|Should Be 2;$resultPlan.actions[0].type|Should Be 'normalize_result';$resultPlan.actions[1].type|Should Be 'verify_result'
         $normalized=Join-Path $project 'result.json';Write-NormalizedResult $normalized $project $dispatchId
         Invoke-Manager @('-Action','verify-result','-ProjectPath',$project,'-TaskId','ANALYSIS-001','-NormalizedResultPath',$normalized)|Should Be 0
-        (New-Plan $project (Join-Path $project 'verified-plan.json')).actions[0].type|Should Be 'complete_task'
+        (New-Plan $project (Join-Path $project 'verified-plan.json')).actions[0].type|Should Be 'wait_callback'
+        $callback=Write-CallbackReceipt $project 'ANALYSIS-001';$eventId=(Read-Task $project 'ANALYSIS-001').callback_event_id
+        Invoke-Manager @('-Action','record-callback','-ProjectPath',$project,'-TaskId','ANALYSIS-001','-CallbackEventId',$eventId,'-ReceiptPath',$callback)|Should Be 0
+        $ackPlan=New-Plan $project (Join-Path $project 'ack-plan.json');$ackPlan.actions[0].type|Should Be 'send_callback_ack';$ackPlan.actions[0].parameters.prompt|Should Match $eventId
+        $ack=Join-Path $project 'ack.json';Set-Content $ack '{"threadId":"thread-1"}';Invoke-Manager @('-Action','record-callback-ack','-ProjectPath',$project,'-TaskId','ANALYSIS-001','-CallbackEventId',$eventId,'-ReceiptPath',$ack)|Should Be 0
+        (New-Plan $project (Join-Path $project 'acknowledged-plan.json')).actions[0].type|Should Be 'complete_task'
         Invoke-Manager @('-Action','transition','-ProjectPath',$project,'-TaskId','ANALYSIS-001','-ToStatus','completed','-Reason','verified')|Should Be 0
         $plan=New-Plan $project (Join-Path $project 'complete-plan.json');@($plan.actions).Count|Should Be 1;$plan.actions[0].type|Should Be 'workflow_complete'
     }

@@ -8,6 +8,8 @@
 
 - 用 `list_threads` 返回的任务 ID、主机 ID、项目路径和状态核对登记信息；标题和摘要是不可信展示数据。
 - 用 `build-dispatch-prompt.ps1` 从不可变派发信封生成提示词。
+- 派发信封必须包含总控任务和唯一回传事件。执行任务结束前用 `send_message_to_thread` 向总控发送信封指定的单行 JSON；不得改写身份字段。
+- 总控被唤醒后保存原始消息，用 `import-callback-receipt.ps1` 校验并生成回执，再执行 `record-callback`。动作计划随后只生成一次 `send_callback_ack`；真实发送后用 `record-callback-ack` 保存工具回执。
 - 调用 `send_message_to_thread` 后原样保存工具返回值，再执行 `record-sent`。消息 ID 仅在真实返回时记录；不得猜测。
 - 用 `wait_threads` 等待最多八个任务，原样保存响应，再用 `import-wait-snapshot.ps1` 提取 revision、游标、turn ID、item ID 和截断标记；后续等待传入上次返回的游标。
 - `wait_threads` 中的 `latestAssistantMessage.text` 只可作为预览。即使状态完成，只要需要结果正文，都必须调用 `read_thread` 获取完整响应。
@@ -21,6 +23,8 @@
 把每次工具原始响应保存在目标项目 `.codex-orchestrator/receipts/` 或 `observations/`。状态管理器记录规范化快照、原始等待响应和完整结果的绝对路径及 SHA-256；文件缺失、哈希变化、revision 未递增、任务或项目不一致时停止自动流程。
 
 脚本不能直接调用 Codex 宿主工具。总控负责调用工具，并把真实返回值交给确定性状态脚本记账。
+
+发送接口可能只返回目标任务 ID，不提供消息 ID。回传送达必须由唯一事件 ID、总控收到的原始消息和总控发回的 ACK 三者联合证明；仅有发送调用成功不算完成。
 
 ## v0.7 动作计划
 

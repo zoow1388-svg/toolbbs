@@ -62,7 +62,7 @@ Describe 'native task result ingestion' {
         Copy-Item (Join-Path $fixtures 'wait-completed-truncated.json') $rawWait
         $snapshot = Join-Path $project 'wait-snapshot.json'
         (Invoke-Script $importer @('-RawWaitPath',$rawWait,'-ExpectedThreadId','thread-001','-ExpectedHostId','local','-OutputPath',$snapshot)).ExitCode | Should Be 0
-        (Invoke-Script $manager @('-Action','initialize','-ProjectPath',$project,'-WorkflowId','WF-001')).ExitCode | Should Be 0
+        (Invoke-Script $manager @('-Action','initialize','-ProjectPath',$project,'-WorkflowId','WF-001','-ControllerThreadId','controller-1')).ExitCode | Should Be 0
         (Invoke-Script $manager @('-Action','register','-ProjectPath',$project,'-TaskId','ANALYSIS-001','-ThreadId','thread-001','-HostId','local','-Role','analyst','-Objective','analyze')).ExitCode | Should Be 0
         foreach ($state in @('awaiting_approval','approved')) { (Invoke-Script $manager @('-Action','transition','-ProjectPath',$project,'-TaskId','ANALYSIS-001','-ToStatus',$state,'-Reason','advance')).ExitCode | Should Be 0 }
         (Invoke-Script $manager @('-Action','prepare-dispatch','-ProjectPath',$project,'-TaskId','ANALYSIS-001')).ExitCode | Should Be 0
@@ -95,7 +95,7 @@ Describe 'native task result ingestion' {
         $snapshot = Join-Path $project 'wait-snapshot.json'
         (Invoke-Script $importer @('-RawWaitPath',$raw,'-ExpectedThreadId','thread-001','-ExpectedHostId','local','-OutputPath',$snapshot)).ExitCode | Should Be 0
         Add-Content $raw ' '
-        (Invoke-Script $manager @('-Action','initialize','-ProjectPath',$project,'-WorkflowId','WF-001')).ExitCode | Should Be 0
+        (Invoke-Script $manager @('-Action','initialize','-ProjectPath',$project,'-WorkflowId','WF-001','-ControllerThreadId','controller-1')).ExitCode | Should Be 0
         (Invoke-Script $manager @('-Action','register','-ProjectPath',$project,'-TaskId','ANALYSIS-001','-ThreadId','thread-001','-HostId','local','-Role','analyst','-Objective','analyze')).ExitCode | Should Be 0
         (Invoke-Script $manager @('-Action','record-wait','-ProjectPath',$project,'-TaskId','ANALYSIS-001','-SnapshotPath',$snapshot)).ExitCode | Should Be 1
         (Get-RecordedTask $project).wait_revision | Should Be $null

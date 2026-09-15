@@ -3,7 +3,7 @@
   "$id": "dispatch.schema.json",
   "type": "object",
   "additionalProperties": false,
-  "required": ["dispatch_id", "workflow_id", "task_id", "thread_id", "host_id", "role", "project_path", "base_revision", "objective", "depends_on", "allowed_files", "authorization", "created_at"],
+  "required": ["dispatch_id", "workflow_id", "task_id", "thread_id", "host_id", "role", "project_path", "base_revision", "objective", "depends_on", "allowed_files", "authorization", "callback", "created_at"],
   "properties": {
     "dispatch_id": {"type": "string", "minLength": 1},
     "workflow_id": {"type": "string", "minLength": 1},
@@ -17,6 +17,17 @@
     "depends_on": {"type": "array", "uniqueItems": true, "items": {"type": "string"}},
     "allowed_files": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
     "authorization": {"enum": ["read-only", "plan-approved", "implementation-approved", "test-approved", "git-approved", "deployment-approved"]},
+    "callback": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["event_id", "target_thread_id", "target_host_id", "status"],
+      "properties": {
+        "event_id": {"type": "string", "minLength": 1},
+        "target_thread_id": {"type": "string", "minLength": 1},
+        "target_host_id": {"type": "string", "minLength": 1},
+        "status": {"const": "completed"}
+      }
+    },
     "created_at": {"type": "string", "format": "date-time"}
   }
 }

@@ -7,7 +7,7 @@
   "properties": {
     "sequence": {"type": "integer", "minimum": 1},
     "workflow_id": {"type": "string", "minLength": 1},
-    "type": {"enum": ["workflow_initialized", "task_registered", "task_transitioned", "dispatch_prepared", "dispatch_sent", "thread_observed", "wait_snapshot_recorded", "dispatch_acknowledged", "result_received", "result_verified"]},
+    "type": {"enum": ["workflow_initialized", "controller_configured", "task_registered", "task_transitioned", "dispatch_prepared", "dispatch_sent", "thread_observed", "wait_snapshot_recorded", "dispatch_acknowledged", "callback_received", "callback_acknowledged", "result_received", "result_verified"]},
     "task_id": {"type": ["string", "null"]},
     "from_status": {"type": ["string", "null"]},
     "to_status": {"type": "string", "minLength": 1},

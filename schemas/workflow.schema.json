@@ -7,6 +7,8 @@
   "properties": {
     "workflow_id": {"type": "string", "minLength": 1},
     "project_path": {"type": "string", "pattern": "^[A-Za-z]:\\\\"},
+    "controller_thread_id": {"type": ["string", "null"], "minLength": 1},
+    "controller_host_id": {"type": ["string", "null"], "minLength": 1},
     "state_version": {"type": "integer", "minimum": 1},
     "current_stage": {"enum": ["analysis", "implementation", "test", "review", "delivery"]},
     "event_sequence": {"type": "integer", "minimum": 0},

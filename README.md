@@ -23,7 +23,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Invoke-Pester '.\tes
 获得状态文件创建授权后初始化：
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File '.\skill\codex-project-orchestrator\scripts\manage-workflow.ps1' -Action initialize -ProjectPath 'D:\目标项目' -WorkflowId 'WF-001'
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File '.\skill\codex-project-orchestrator\scripts\manage-workflow.ps1' -Action initialize -ProjectPath 'D:\目标项目' -WorkflowId 'WF-001' -ControllerThreadId '总控任务ID' -ControllerHostId 'local'
 ```
 
 登记任务时，`DependsOn` 和 `AllowedFiles` 使用逗号分隔。运行 `-Action audit` 可检查事件序号、状态一致性和中断写入残留。运行状态保存在目标项目的 `.codex-orchestrator` 中并默认由 Git 忽略。
@@ -110,3 +110,13 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File '.\skill\codex-project-o
 已在同一 D 盘项目中使用两个真实 Codex 任务跑通完整只读流程。v0.8 根据现场结果修复两项问题：宿主没有游标时不再传空 `afterCursor`；活动 commentary 不再被误判为最终结果。
 
 结果读取现在必须同时满足 `latest_turn_status=completed` 和 `latest_item_phase=final_answer`。真实验证范围和未覆盖场景见 [`docs/v0.8-real-e2e.md`](docs/v0.8-real-e2e.md)。
+
+## v0.9 主动回传与唤醒
+
+派发信封现在包含不可变总控身份和唯一 `callback_event_id`。执行任务完成后主动向总控发送固定 JSON，从而唤醒等待或 idle 的总控任务。总控保存收到的原始消息后先生成可信回执：
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File '.\skill\codex-project-orchestrator\scripts\import-callback-receipt.ps1' -RawMessagePath 'D:\目标项目\.codex-orchestrator\callbacks\原始消息.txt' -ExpectedEventId '回传事件ID' -ExpectedWorkflowId 'WF-001' -ExpectedTaskId 'ANALYSIS-001' -ExpectedDispatchId '派发编号' -ExpectedSourceThreadId '执行任务ID' -ExpectedSourceHostId 'local' -ExpectedTargetThreadId '总控任务ID' -ExpectedTargetHostId 'local' -OutputPath 'D:\目标项目\.codex-orchestrator\callbacks\回传事件ID.json'
+```
+
+随后使用 `record-callback` 记账，按动作计划向执行任务发送 `callback_ack`，并用 `record-callback-ack` 保存真实发送回执。任务只有同时满足可信结果验证和回传 ACK 才能完成；重复事件不会重复记账或再次派发。

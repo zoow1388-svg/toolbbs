@@ -20,7 +20,7 @@
         "required": ["action_id", "type", "task_ids", "based_on_event_sequence", "operation", "parameters", "evidence_required", "state_changing", "authorization_required", "reason"],
         "properties": {
           "action_id": {"type": "string", "minLength": 1},
-          "type": {"enum": ["request_authorization", "prepare_dispatch", "send_message", "wait_tasks", "read_result", "normalize_result", "verify_result", "complete_task", "manual_review", "workflow_complete"]},
+          "type": {"enum": ["request_authorization", "prepare_dispatch", "send_message", "wait_tasks", "read_result", "normalize_result", "verify_result", "send_callback_ack", "wait_callback", "complete_task", "manual_review", "workflow_complete"]},
           "task_ids": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
           "based_on_event_sequence": {"type": "integer", "minimum": 0},
           "operation": {"type": "string", "minLength": 1},

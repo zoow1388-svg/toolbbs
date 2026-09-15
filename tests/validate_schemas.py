@@ -26,6 +26,7 @@ pairs = {
     "wait-snapshot": load_json(NATIVE_EXAMPLES / "wait-snapshot.json"),
     "verification-receipt": load_json(EXAMPLES / "verification-receipt.json"),
     "action-plan": load_json(EXAMPLES / "action-plan.json"),
+    "callback-receipt": load_json(EXAMPLES / "callback-receipt.json"),
 }
 
 for name, document in pairs.items():
@@ -53,4 +54,4 @@ except jsonschema.ValidationError:
 else:
     raise AssertionError("Object changed_files entry unexpectedly passed validation")
 
-print("SCHEMA VALID: 9 positive, 2 negative")
+print("SCHEMA VALID: 10 positive, 2 negative")

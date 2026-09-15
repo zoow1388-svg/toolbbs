@@ -9,6 +9,8 @@ Describe 'native task adapter artifacts' {
         $content=Get-Content $output -Raw -Encoding UTF8
         $content|Should Match 'ANALYSIS-001-exampledispatch'
         $content|Should Match 'example-thread'
+        $content|Should Match 'ANALYSIS-001-exampledispatch:completion'
+        $content|Should Match 'send_message_to_thread'
         & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $builder -DispatchPath $dispatch -OutputPath $output 2>$null|Out-Null
         $LASTEXITCODE|Should Be 1
     }
