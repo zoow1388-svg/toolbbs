@@ -1,4 +1,4 @@
 interface:
-  display_name: "Codex ÏîÄ¿×Ü¿Ø"
-  short_description: "Ğ­µ÷Í¬Ò»ÏîÄ¿µÄ¶à¸ö Codex ÈÎÎñ²¢Ö´ĞĞ½×¶ÎÃÅ½û"
-  default_prompt: "Ê¹ÓÃ $codex-project-orchestrator ·ÖÎöµ±Ç°ÏîÄ¿£¬Éú³É°²È«µÄ¶àÈÎÎñ¹¤×÷Á÷£»ĞŞ¸ÄÇ°ÏÈÌá½»·½°¸²¢µÈ´ıÈ·ÈÏ¡£"
+  display_name: "Codex é¡¹ç›®æ€»æ§"
+  short_description: "åè°ƒåŒä¸€é¡¹ç›®çš„å¤šä¸ª Codex ä»»åŠ¡å¹¶æ‰§è¡Œé˜¶æ®µé—¨ç¦"
+  default_prompt: "ä½¿ç”¨ $codex-project-orchestrator åˆ†æå½“å‰é¡¹ç›®å¹¶ç”Ÿæˆå®‰å…¨çš„å¤šä»»åŠ¡å·¥ä½œæµï¼›ä¿®æ”¹å‰å…ˆæäº¤æ–¹æ¡ˆå¹¶ç­‰å¾…ç¡®è®¤ã€‚"
