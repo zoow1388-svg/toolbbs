@@ -4,7 +4,9 @@ param(
     [string]$ProjectPath,
     [string]$ExpectedTaskId,
     [string]$ExpectedDispatchId,
-    [string]$ExpectedThreadId
+    [string]$ExpectedThreadId,
+    [ValidateSet('analyst','developer','tester','reviewer')][string]$ExpectedRole,
+    [string]$AllowedFiles=''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -16,7 +18,7 @@ function Has-Property($Object,[string]$Name) { return $null -ne $Object -and $Ob
 try { $result = Get-Content -LiteralPath $ResultPath -Raw -Encoding UTF8 | ConvertFrom-Json }
 catch { Write-Output "INVALID: `$ - JSON 解析失败: $($_.Exception.Message)"; exit 1 }
 
-$required = @('task_id','dispatch_id','thread_id','host_id','project_path','base_revision','end_revision','summary','preexisting_changes','changed_files','commands','checks','artifacts','unexecuted','blockers','risks','required_authorization','created_at','normalization')
+$required = @('task_id','dispatch_id','thread_id','host_id','project_path','base_revision','end_revision','summary','preexisting_changes','changed_files','commands','checks','artifacts','unexecuted','blockers','risks','required_authorization','created_at','stage_evidence','normalization')
 foreach ($name in $required) { if (-not (Has-Property $result $name)) { Add-ResultError "`$.$name" '缺少必填字段' } }
 $allowedTopLevel = @($required)
 foreach ($property in $result.PSObject.Properties.Name) { if ($property -notin $allowedTopLevel) { Add-ResultError "`$.$property" '不允许额外字段' } }
@@ -71,6 +73,27 @@ if (Has-Property $result 'normalization') {
     $decisionIndex=0
     foreach($decision in @($result.normalization.decisions)){if($decision -isnot [string]){Add-ResultError "`$.normalization.decisions[$decisionIndex]" '必须是字符串'};$decisionIndex++}
 }
+
+if(Has-Property $result 'stage_evidence'){
+    $stage=$result.stage_evidence
+    foreach($name in @('role','outcome','inspected_revision','criteria','findings')){if(-not(Has-Property $stage $name)){Add-ResultError "`$.stage_evidence.$name" '缺少必填字段'}}
+    foreach($property in $stage.PSObject.Properties.Name){if($property -notin @('role','outcome','inspected_revision','criteria','findings')){Add-ResultError "`$.stage_evidence.$property" '不允许额外字段'}}
+    if($ExpectedRole -and $stage.role -ne $ExpectedRole){Add-ResultError '$.stage_evidence.role' '与登记任务角色不一致'}
+    if($stage.outcome -ne 'passed'){Add-ResultError '$.stage_evidence.outcome' '阶段结论不是 passed，不能放行'}
+    if($stage.inspected_revision -ne $result.end_revision){Add-ResultError '$.stage_evidence.inspected_revision' '必须与结果 end_revision 一致'}
+    $criterionByRole=@{analyst='plan_ready';developer='implementation_complete';tester='tests_executed';reviewer='code_review_complete'}
+    if($ExpectedRole -and $criterionByRole[$ExpectedRole] -notin @($stage.criteria)){Add-ResultError '$.stage_evidence.criteria' "缺少角色门槛 $($criterionByRole[$ExpectedRole])"}
+    if($ExpectedRole -eq 'reviewer' -and @($stage.findings).Count -gt 0){Add-ResultError '$.stage_evidence.findings' '审查仍有未解决问题'}
+}
+if(@($result.blockers).Count -gt 0){Add-ResultError '$.blockers' '存在阻塞项，不能放行'}
+if(@($result.checks|Where-Object{$_.status -eq 'failed'}).Count -gt 0){Add-ResultError '$.checks' '存在失败检查，不能放行'}
+if($ExpectedRole -eq 'developer'){
+    if(@($result.changed_files).Count -eq 0){Add-ResultError '$.changed_files' '开发任务必须报告实际修改文件'}
+    $allowed=@($AllowedFiles -split ','|Where-Object{$_}|ForEach-Object{$_.Trim()})
+    foreach($file in @($result.changed_files)){if($file -notin $allowed){Add-ResultError '$.changed_files' "文件超出授权范围: $file"}}
+}
+if($ExpectedRole -in @('tester','reviewer') -and @($result.changed_files).Count -gt 0){Add-ResultError '$.changed_files' '测试或审查任务不得修改产品文件'}
+if($ExpectedRole -eq 'tester' -and @($result.checks|Where-Object{$_.status -eq 'passed'}).Count -eq 0){Add-ResultError '$.checks' '测试任务至少需要一个通过的实际检查'}
 
 $effectiveProject = if ([string]::IsNullOrWhiteSpace($ProjectPath)) { [string]$result.project_path } else { [System.IO.Path]::GetFullPath($ProjectPath) }
 if (-not [string]::IsNullOrWhiteSpace($effectiveProject) -and (Test-Path -LiteralPath $effectiveProject)) {

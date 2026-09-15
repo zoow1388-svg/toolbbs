@@ -5,10 +5,12 @@
   "thread_id": "example-thread",
   "host_id": "local",
   "role": "analyst",
+  "repair_of": null,
   "project_path": "D:\\example-project",
   "base_revision": "unborn",
   "objective": "只读分析项目结构",
   "depends_on": [],
+  "dependency_revisions": [],
   "allowed_files": [],
   "authorization": "read-only",
   "callback": {

@@ -14,7 +14,7 @@ function New-Plan([string]$Project,[string]$Path){
 }
 function Approve-Task([string]$Project,[string]$TaskId){foreach($status in @('awaiting_approval','approved')){Invoke-Manager @('-Action','transition','-ProjectPath',$Project,'-TaskId',$TaskId,'-ToStatus',$status,'-Reason','approve')|Should Be 0}}
 function Write-NormalizedResult([string]$Path,[string]$Project,[string]$DispatchId){
-    $value=[ordered]@{task_id='ANALYSIS-001';dispatch_id=$DispatchId;thread_id='thread-1';host_id='local';project_path=$Project;base_revision='unborn';end_revision='unborn';summary='done';preexisting_changes=@();changed_files=@();commands=@();checks=@();artifacts=@();unexecuted=@();blockers=@();risks=@();required_authorization=$null;created_at=(Get-Date).ToUniversalTime().ToString('o');normalization=[ordered]@{normalized_by='controller';source_thread_id='thread-1';source_message_id='result-1';source_format='text';decisions=@()}}
+    $value=[ordered]@{task_id='ANALYSIS-001';dispatch_id=$DispatchId;thread_id='thread-1';host_id='local';project_path=$Project;base_revision='unborn';end_revision='unborn';summary='done';preexisting_changes=@();changed_files=@();commands=@();checks=@();artifacts=@();unexecuted=@();blockers=@();risks=@();required_authorization=$null;created_at=(Get-Date).ToUniversalTime().ToString('o');stage_evidence=[ordered]@{role='analyst';outcome='passed';inspected_revision='unborn';criteria=@('plan_ready');findings=@()};normalization=[ordered]@{normalized_by='controller';source_thread_id='thread-1';source_message_id='result-1';source_format='text';decisions=@()}}
     [IO.File]::WriteAllText($Path,($value|ConvertTo-Json -Depth 10),[Text.UTF8Encoding]::new($false))
 }
 function Write-CallbackReceipt([string]$Project,[string]$TaskId){

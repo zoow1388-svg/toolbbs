@@ -61,6 +61,7 @@ function Add-Defaults {
         if ($Workflow.PSObject.Properties.Match($name).Count -eq 0) { Add-Member -InputObject $Workflow -NotePropertyName $name -NotePropertyValue $null }
     }
     foreach ($task in $Tasks) {
+        if($task.PSObject.Properties.Match('repair_of').Count -eq 0){Add-Member -InputObject $task -NotePropertyName repair_of -NotePropertyValue $null}
         if ($task.PSObject.Properties.Match('dispatch_count').Count -eq 0) { Add-Member -InputObject $task -NotePropertyName dispatch_count -NotePropertyValue 0 }
         if ($task.PSObject.Properties.Match('raw_result_path').Count -eq 0) { Add-Member -InputObject $task -NotePropertyName raw_result_path -NotePropertyValue $null }
         if ($task.PSObject.Properties.Match('normalized_result_path').Count -eq 0) { Add-Member -InputObject $task -NotePropertyName normalized_result_path -NotePropertyValue $null }
@@ -87,7 +88,7 @@ function Add-Defaults {
             Add-Member -InputObject $task -NotePropertyName verification_status -NotePropertyValue $verificationStatus
         }
     }
-    if ([int]$Workflow.state_version -lt 8) { $Workflow.state_version = 8 }
+    if ([int]$Workflow.state_version -lt 9) { $Workflow.state_version = 9 }
 }
 
 function Write-Event {
@@ -106,7 +107,7 @@ function Initialize-WorkflowState {
         $workflowPath = Join-Path $state 'workflow.json'
         if (Test-Path -LiteralPath $workflowPath) { throw 'Workflow already exists.' }
         $now = Get-UtcTimestamp
-        $workflow = [ordered]@{ workflow_id=$WorkflowId; project_path=$resolved; state_version=8; controller_thread_id=$(if([string]::IsNullOrWhiteSpace($ControllerThreadId)){$null}else{$ControllerThreadId}); controller_host_id=$(if([string]::IsNullOrWhiteSpace($ControllerThreadId)){$null}else{$ControllerHostId}); status='draft'; current_stage='analysis'; authorization='read-only'; event_sequence=0; created_at=$now; updated_at=$now }
+        $workflow = [ordered]@{ workflow_id=$WorkflowId; project_path=$resolved; state_version=9; controller_thread_id=$(if([string]::IsNullOrWhiteSpace($ControllerThreadId)){$null}else{$ControllerThreadId}); controller_host_id=$(if([string]::IsNullOrWhiteSpace($ControllerThreadId)){$null}else{$ControllerHostId}); status='draft'; current_stage='analysis'; authorization='read-only'; event_sequence=0; created_at=$now; updated_at=$now }
         $tasks = @()
         Write-Event $state $workflow 'workflow_initialized' $null $null 'draft' 'initialization'
         Write-JsonAtomic $workflow $workflowPath
@@ -134,13 +135,23 @@ function Set-WorkflowController {
 }
 
 function Register-WorkflowTask {
-    param([string]$ProjectPath,[string]$TaskId,[string]$ThreadId,[string]$HostId,[string]$Role,[string]$Objective,[string]$Authorization,[string]$BaseRevision,[string[]]$DependsOn,[string[]]$AllowedFiles)
+    param([string]$ProjectPath,[string]$TaskId,[string]$ThreadId,[string]$HostId,[string]$Role,[string]$Objective,[string]$Authorization,[string]$BaseRevision,[string[]]$DependsOn,[string[]]$AllowedFiles,[string]$RepairOf)
     $state = Join-Path ([System.IO.Path]::GetFullPath($ProjectPath)) '.codex-orchestrator'
     Invoke-WithStateLock $state {
         $workflowPath = Join-Path $state 'workflow.json'; $tasksPath = Join-Path $state 'tasks.json'
         $workflow = Read-StateJson $workflowPath; $tasks = @(Read-StateJson $tasksPath | ForEach-Object { $_ }); Add-Defaults $workflow $tasks
         if (@($tasks | Where-Object { $_.task_id -eq $TaskId }).Count -gt 0) { throw "Duplicate task_id: $TaskId" }
         if (@($tasks | Where-Object { $_.thread_id -eq $ThreadId }).Count -gt 0) { throw "Duplicate thread_id: $ThreadId" }
+        $repairSource=$null
+        if(-not [string]::IsNullOrWhiteSpace($RepairOf)){
+            $source=@($tasks|Where-Object{$_.task_id -eq $RepairOf});if($source.Count -ne 1){throw "Repair source not found: $RepairOf"};$repairSource=$source[0]
+            if($repairSource.status -notin @('failed','blocked')){throw 'Repair source must be failed or blocked.'}
+            if([int]$repairSource.repair_count -ge 1){throw 'Only one targeted repair is allowed.'}
+            if($repairSource.role -ne $Role){throw 'Repair task role must match its source task.'}
+            if($repairSource.authorization -ne $Authorization){throw 'Repair task cannot expand authorization.'}
+            if((@($repairSource.depends_on|Sort-Object)-join '|') -ne (@($DependsOn|Sort-Object)-join '|')){throw 'Repair task must preserve source dependencies.'}
+            if(@($AllowedFiles|Where-Object{$_ -notin @($repairSource.allowed_files)}).Count -gt 0){throw 'Repair task cannot expand allowed files.'}
+        }
         foreach ($dependency in @($DependsOn)) { if (@($tasks | Where-Object { $_.task_id -eq $dependency }).Count -eq 0) { throw "Dependency not found: $dependency" } }
         $dependencyRoles = @($tasks | Where-Object { $_.task_id -in @($DependsOn) } | ForEach-Object { $_.role })
         if ($Role -eq 'developer' -and 'analyst' -notin $dependencyRoles) { throw 'Developer must depend on an analyst task.' }
@@ -151,7 +162,8 @@ function Register-WorkflowTask {
         $activeFiles = @($tasks | Where-Object { $_.role -eq 'developer' -and $_.status -notin $script:TerminalStates } | ForEach-Object { $_.allowed_files })
         $overlap = @($AllowedFiles | Where-Object { $_ -in $activeFiles })
         if ($Role -eq 'developer' -and $overlap.Count -gt 0) { throw "File ownership conflict: $($overlap -join ', ')" }
-        $task = [ordered]@{ task_id=$TaskId; thread_id=$ThreadId; host_id=$HostId; role=$Role; status='draft'; depends_on=@($DependsOn); project_path=$workflow.project_path; base_revision=$BaseRevision; allowed_files=@($AllowedFiles); objective=$Objective; authorization=$Authorization; repair_count=0; dispatch_count=0; dispatch_id=$null; delivery_status='not-prepared'; dispatch_path=$null; sent_message_id=$null; send_receipt_path=$null; send_receipt_sha256=$null; result_message_id=$null; read_cursor=$null; wait_revision=$null; wait_snapshot_path=$null; wait_snapshot_sha256=$null; latest_turn_id=$null; latest_turn_status=$null; latest_item_id=$null; latest_item_phase=$null; result_truncated=$false; callback_event_id=$null; callback_status='not-prepared'; callback_receipt_path=$null; callback_receipt_sha256=$null; callback_received_at=$null; callback_ack_receipt_path=$null; callback_ack_receipt_sha256=$null; callback_acknowledged_at=$null; observation_path=$null; observation_sha256=$null; observed_status=$null; observed_at=$null; dispatched_at=$null; acknowledged_at=$null; result_received_at=$null; raw_result_path=$null; raw_result_sha256=$null; normalized_result_path=$null; normalized_result_sha256=$null; verification_receipt_path=$null; verification_receipt_sha256=$null; verification_status='unverified'; verified_at=$null; verified=$false; updated_at=(Get-UtcTimestamp) }
+        $task = [ordered]@{ task_id=$TaskId; thread_id=$ThreadId; host_id=$HostId; role=$Role; repair_of=$(if([string]::IsNullOrWhiteSpace($RepairOf)){$null}else{$RepairOf}); status='draft'; depends_on=@($DependsOn); project_path=$workflow.project_path; base_revision=$BaseRevision; allowed_files=@($AllowedFiles); objective=$Objective; authorization=$Authorization; repair_count=0; dispatch_count=0; dispatch_id=$null; delivery_status='not-prepared'; dispatch_path=$null; sent_message_id=$null; send_receipt_path=$null; send_receipt_sha256=$null; result_message_id=$null; read_cursor=$null; wait_revision=$null; wait_snapshot_path=$null; wait_snapshot_sha256=$null; latest_turn_id=$null; latest_turn_status=$null; latest_item_id=$null; latest_item_phase=$null; result_truncated=$false; callback_event_id=$null; callback_status='not-prepared'; callback_receipt_path=$null; callback_receipt_sha256=$null; callback_received_at=$null; callback_ack_receipt_path=$null; callback_ack_receipt_sha256=$null; callback_acknowledged_at=$null; observation_path=$null; observation_sha256=$null; observed_status=$null; observed_at=$null; dispatched_at=$null; acknowledged_at=$null; result_received_at=$null; raw_result_path=$null; raw_result_sha256=$null; normalized_result_path=$null; normalized_result_sha256=$null; verification_receipt_path=$null; verification_receipt_sha256=$null; verification_status='unverified'; verified_at=$null; verified=$false; updated_at=(Get-UtcTimestamp) }
+        if($null -ne $repairSource){$repairSource.repair_count=[int]$repairSource.repair_count+1;$repairSource.updated_at=Get-UtcTimestamp}
         $tasks += [pscustomobject]$task
         Write-Event $state $workflow 'task_registered' $TaskId $null 'draft' 'registration'
         $workflow.updated_at = Get-UtcTimestamp; Write-JsonAtomic $workflow $workflowPath; Write-JsonAtomic $tasks $tasksPath
@@ -169,14 +181,21 @@ function New-WorkflowDispatch {
         if ($task.status -ne 'approved') { throw 'Only an approved task can be prepared for dispatch.' }
         if([string]::IsNullOrWhiteSpace($workflow.controller_thread_id) -or [string]::IsNullOrWhiteSpace($workflow.controller_host_id)){throw 'Workflow controller identity must be configured before dispatch.'}
         if ($task.delivery_status -ne 'not-prepared' -or [int]$task.dispatch_count -gt 0) { throw 'Task dispatch was already prepared or sent.' }
+        $dependencyRevisions=[Collections.Generic.List[object]]::new()
         foreach ($dependency in @($task.depends_on)) {
             $dep = @($tasks | Where-Object { $_.task_id -eq $dependency })
             if ($dep.Count -ne 1 -or $dep[0].status -ne 'completed' -or -not $dep[0].verified) { throw "Dependency is not verified complete: $dependency" }
+            if(-not(Test-Path -LiteralPath $dep[0].normalized_result_path)){throw "Dependency result not found: $dependency"}
+            $depResult=Read-StateJson $dep[0].normalized_result_path
+            $dependencyRevisions.Add([pscustomobject][ordered]@{task_id=$dependency;end_revision=$depResult.end_revision})
         }
+        $distinctRevisions=@($dependencyRevisions|ForEach-Object{$_.end_revision}|Select-Object -Unique)
+        if($distinctRevisions.Count -gt 1){throw 'Dependencies do not describe one shared code revision.'}
+        if($distinctRevisions.Count -eq 1 -and $task.base_revision -ne $distinctRevisions[0]){throw 'Task base revision does not match the verified dependency revision.'}
         $dispatchId = "$TaskId-$([guid]::NewGuid().ToString('N'))"
         $callbackEventId="$dispatchId`:completion"
         $callback=[ordered]@{event_id=$callbackEventId;target_thread_id=$workflow.controller_thread_id;target_host_id=$workflow.controller_host_id;status='completed'}
-        $dispatch = [ordered]@{ dispatch_id=$dispatchId; workflow_id=$workflow.workflow_id; task_id=$task.task_id; thread_id=$task.thread_id; host_id=$task.host_id; role=$task.role; project_path=$task.project_path; base_revision=$task.base_revision; objective=$task.objective; depends_on=@($task.depends_on); allowed_files=@($task.allowed_files); authorization=$task.authorization; callback=$callback; created_at=(Get-UtcTimestamp) }
+        $dispatch = [ordered]@{ dispatch_id=$dispatchId; workflow_id=$workflow.workflow_id; task_id=$task.task_id; thread_id=$task.thread_id; host_id=$task.host_id; role=$task.role; repair_of=$task.repair_of; project_path=$task.project_path; base_revision=$task.base_revision; objective=$task.objective; depends_on=@($task.depends_on); dependency_revisions=@($dependencyRevisions); allowed_files=@($task.allowed_files); authorization=$task.authorization; callback=$callback; created_at=(Get-UtcTimestamp) }
         $dispatchDirectory = Join-Path $state 'dispatches'; $dispatchPath = Join-Path $dispatchDirectory "$dispatchId.json"
         Write-JsonAtomic $dispatch $dispatchPath
         $task.dispatch_id = $dispatchId; $task.dispatch_path = [System.IO.Path]::GetFullPath($dispatchPath); $task.delivery_status = 'prepared'; $task.callback_event_id=$callbackEventId;$task.callback_status='prepared';$task.updated_at = Get-UtcTimestamp
@@ -342,7 +361,9 @@ function Confirm-WorkflowResultVerified {
         $resolvedNormalized=[IO.Path]::GetFullPath($NormalizedResultPath)
         $validator=Join-Path $PSScriptRoot 'validate-result.ps1'
         $powershellPath=(Get-Process -Id $PID).Path
-        $validationOutput=@(& $powershellPath -NoProfile -ExecutionPolicy Bypass -File $validator -ResultPath $resolvedNormalized -ProjectPath $resolvedProject -ExpectedTaskId $task.task_id -ExpectedDispatchId $task.dispatch_id -ExpectedThreadId $task.thread_id 2>&1)
+        $validationArguments=@('-NoProfile','-ExecutionPolicy','Bypass','-File',$validator,'-ResultPath',$resolvedNormalized,'-ProjectPath',$resolvedProject,'-ExpectedTaskId',$task.task_id,'-ExpectedDispatchId',$task.dispatch_id,'-ExpectedThreadId',$task.thread_id,'-ExpectedRole',$task.role)
+        if(@($task.allowed_files).Count -gt 0){$validationArguments+=@('-AllowedFiles',(@($task.allowed_files)-join ','))}
+        $validationOutput=@(& $powershellPath @validationArguments 2>&1)
         if($LASTEXITCODE -ne 0){throw "Normalized result validation failed: $($validationOutput -join ' | ')"}
         $normalized=Read-StateJson $resolvedNormalized
         if($normalized.host_id -ne $task.host_id){throw 'Normalized result host does not match the assigned task.'}

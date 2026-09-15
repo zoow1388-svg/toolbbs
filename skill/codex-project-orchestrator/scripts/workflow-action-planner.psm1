@@ -40,6 +40,7 @@ function New-WorkflowActionPlan {
             continue
         }
         if($task.status -in @('blocked','failed','cancelled','stale')){
+            if($task.status -in @('blocked','failed') -and @($tasks|Where-Object{$_.repair_of -eq $task.task_id}).Count -eq 1){continue}
             Add-Action 'manual_review' @($task.task_id) 'inspect_task' ([ordered]@{task_id=$task.task_id;status=$task.status}) @('current task state','blocking evidence') $false $null 'Terminal or exceptional state requires inspection.'
             continue
         }

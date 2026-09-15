@@ -9,6 +9,7 @@
     "thread_id": {"type": "string", "minLength": 1},
     "host_id": {"type": "string", "minLength": 1},
     "role": {"enum": ["analyst", "developer", "tester", "reviewer"]},
+    "repair_of": {"type": ["string", "null"]},
     "status": {"enum": ["draft", "awaiting_approval", "approved", "dispatched", "running", "verifying", "completed", "blocked", "failed", "cancelled", "stale"]},
     "depends_on": {"type": "array", "uniqueItems": true, "items": {"type": "string"}},
     "project_path": {"type": "string", "pattern": "^[A-Za-z]:\\\\"},

@@ -36,11 +36,14 @@ function Complete-CallbackHandshake([string]$Project,[string]$TaskId) {
 }
 
 function Write-NormalizedResult([string]$Path,[string]$Project,[string]$TaskId,[string]$ThreadId,[string]$DispatchId,[string]$MessageId) {
+    $task=Get-Task $Project $TaskId;$criterionByRole=@{analyst='plan_ready';developer='implementation_complete';tester='tests_executed';reviewer='code_review_complete'}
+    $changedFiles=@();if($task.role -eq 'developer'){$changedFiles=@($task.allowed_files[0])};$stageChecks=@();if($task.role -eq 'tester'){$stageChecks=@([ordered]@{name='automated test';status='passed'})}
     $value=[ordered]@{
         task_id=$TaskId;dispatch_id=$DispatchId;thread_id=$ThreadId;host_id='local';project_path=$Project
-        base_revision='unborn';end_revision='unborn';summary='verified result';preexisting_changes=@();changed_files=@()
-        commands=@();checks=@();artifacts=@();unexecuted=@();blockers=@();risks=@();required_authorization=$null
+        base_revision='unborn';end_revision='unborn';summary='verified result';preexisting_changes=@();changed_files=$changedFiles
+        commands=@();checks=$stageChecks;artifacts=@();unexecuted=@();blockers=@();risks=@();required_authorization=$null
         created_at=(Get-Date).ToUniversalTime().ToString('o')
+        stage_evidence=[ordered]@{role=$task.role;outcome='passed';inspected_revision='unborn';criteria=@($criterionByRole[[string]$task.role]);findings=@()}
         normalization=[ordered]@{normalized_by='controller';source_thread_id=$ThreadId;source_message_id=$MessageId;source_format='text';decisions=@()}
     }
     [IO.File]::WriteAllText($Path,($value|ConvertTo-Json -Depth 10),[Text.UTF8Encoding]::new($false))
@@ -55,7 +58,7 @@ Describe 'manage-workflow lifecycle' {
     It 'initializes versioned state and an event log' {
         Invoke-Manager @('-Action','initialize','-ProjectPath',$project,'-WorkflowId','WF-001') | Should Be 0
         $workflow = Get-Content (Join-Path $project '.codex-orchestrator\workflow.json') -Raw | ConvertFrom-Json
-        $workflow.state_version | Should Be 8
+        $workflow.state_version | Should Be 9
         $workflow.controller_thread_id | Should Be 'controller-1'
         $workflow.event_sequence | Should Be 1
         @(Get-Content (Join-Path $project '.codex-orchestrator\events.jsonl')).Count | Should Be 1
@@ -71,7 +74,7 @@ Describe 'manage-workflow lifecycle' {
         $state=Join-Path $project '.codex-orchestrator';New-Item -ItemType Directory $state|Out-Null;$now=(Get-Date).ToUniversalTime().ToString('o')
         @{workflow_id='WF-OLD';project_path=$project;state_version=7;status='draft';current_stage='analysis';authorization='read-only';event_sequence=0;created_at=$now;updated_at=$now}|ConvertTo-Json|Set-Content (Join-Path $state 'workflow.json');Set-Content (Join-Path $state 'tasks.json') '[]';Set-Content (Join-Path $state 'events.jsonl') -Value @()
         Invoke-Manager @('-Action','configure-controller','-ProjectPath',$project,'-ControllerThreadId','controller-new')|Should Be 0
-        $workflow=Get-Content (Join-Path $state 'workflow.json') -Raw|ConvertFrom-Json;$workflow.controller_thread_id|Should Be 'controller-new';$workflow.state_version|Should Be 8
+        $workflow=Get-Content (Join-Path $state 'workflow.json') -Raw|ConvertFrom-Json;$workflow.controller_thread_id|Should Be 'controller-new';$workflow.state_version|Should Be 9
         Invoke-Manager @('-Action','configure-controller','-ProjectPath',$project,'-ControllerThreadId','controller-new')|Should Be 0
         Invoke-Manager @('-Action','configure-controller','-ProjectPath',$project,'-ControllerThreadId','controller-other')|Should Be 1
     }
@@ -155,7 +158,7 @@ Describe 'manage-workflow lifecycle' {
         Set-Content (Join-Path $state 'tasks.json') '[]'
         Invoke-Manager @('-Action','register','-ProjectPath',$project,'-TaskId','ANALYSIS-001','-ThreadId','thread-1','-Role','analyst','-Objective','analyze') | Should Be 0
         $workflow = Get-Content (Join-Path $state 'workflow.json') -Raw | ConvertFrom-Json
-        $workflow.state_version | Should Be 8
+        $workflow.state_version | Should Be 9
         $workflow.event_sequence | Should Be 1
     }
 
@@ -166,7 +169,7 @@ Describe 'manage-workflow lifecycle' {
         Set-Content (Join-Path $state 'tasks.json') '[]'
         Invoke-Manager @('-Action','register','-ProjectPath',$project,'-TaskId','ANALYSIS-001','-ThreadId','thread-1','-Role','analyst','-Objective','analyze') | Should Be 0
         $workflow = Get-Content (Join-Path $state 'workflow.json') -Raw | ConvertFrom-Json
-        $workflow.state_version | Should Be 8
+        $workflow.state_version | Should Be 9
         (Get-Task $project 'ANALYSIS-001').delivery_status | Should Be 'not-prepared'
     }
 
@@ -179,7 +182,7 @@ Describe 'manage-workflow lifecycle' {
         foreach($name in @('normalized_result_sha256','verification_receipt_path','verification_receipt_sha256','verified_at','latest_turn_status','latest_item_phase')){$tasks[0].PSObject.Properties.Remove($name)}
         $tasks|ConvertTo-Json -Depth 20|Set-Content (Join-Path $state 'tasks.json')
         Invoke-Manager @('-Action','transition','-ProjectPath',$project,'-TaskId','ANALYSIS-001','-ToStatus','awaiting_approval','-Reason','upgrade') | Should Be 0
-        (Get-Content (Join-Path $state 'workflow.json') -Raw|ConvertFrom-Json).state_version | Should Be 8
+        (Get-Content (Join-Path $state 'workflow.json') -Raw|ConvertFrom-Json).state_version | Should Be 9
         $upgraded=Get-Task $project 'ANALYSIS-001';$upgraded.PSObject.Properties.Name -contains 'verification_receipt_path' | Should Be $true;$upgraded.PSObject.Properties.Name -contains 'latest_turn_status'|Should Be $true;$upgraded.latest_item_phase|Should Be $null
     }
 
@@ -299,10 +302,10 @@ Describe 'manage-workflow lifecycle' {
 
     It 'runs the complete analysis development test and review dependency chain' {
         Invoke-Manager @('-Action','initialize','-ProjectPath',$project,'-WorkflowId','WF-001') | Should Be 0
-        Invoke-Manager @('-Action','register','-ProjectPath',$project,'-TaskId','ANALYSIS-001','-ThreadId','thread-1','-Role','analyst','-Objective','analyze') | Should Be 0
-        Invoke-Manager @('-Action','register','-ProjectPath',$project,'-TaskId','DEV-001','-ThreadId','thread-2','-Role','developer','-Objective','develop','-Authorization','implementation-approved','-DependsOn','ANALYSIS-001','-AllowedFiles','src/app.ps1') | Should Be 0
-        Invoke-Manager @('-Action','register','-ProjectPath',$project,'-TaskId','TEST-001','-ThreadId','thread-3','-Role','tester','-Objective','test','-Authorization','test-approved','-DependsOn','DEV-001') | Should Be 0
-        Invoke-Manager @('-Action','register','-ProjectPath',$project,'-TaskId','REVIEW-001','-ThreadId','thread-4','-Role','reviewer','-Objective','review','-DependsOn','DEV-001,TEST-001') | Should Be 0
+        Invoke-Manager @('-Action','register','-ProjectPath',$project,'-TaskId','ANALYSIS-001','-ThreadId','thread-1','-Role','analyst','-Objective','analyze','-BaseRevision','unborn') | Should Be 0
+        Invoke-Manager @('-Action','register','-ProjectPath',$project,'-TaskId','DEV-001','-ThreadId','thread-2','-Role','developer','-Objective','develop','-Authorization','implementation-approved','-DependsOn','ANALYSIS-001','-AllowedFiles','src/app.ps1','-BaseRevision','unborn') | Should Be 0
+        Invoke-Manager @('-Action','register','-ProjectPath',$project,'-TaskId','TEST-001','-ThreadId','thread-3','-Role','tester','-Objective','test','-Authorization','test-approved','-DependsOn','DEV-001','-BaseRevision','unborn') | Should Be 0
+        Invoke-Manager @('-Action','register','-ProjectPath',$project,'-TaskId','REVIEW-001','-ThreadId','thread-4','-Role','reviewer','-Objective','review','-DependsOn','DEV-001,TEST-001','-BaseRevision','unborn') | Should Be 0
         foreach ($taskId in @('ANALYSIS-001','DEV-001','TEST-001','REVIEW-001')) {
             foreach ($stateName in @('awaiting_approval','approved')) { Invoke-Manager @('-Action','transition','-ProjectPath',$project,'-TaskId',$taskId,'-ToStatus',$stateName,'-Reason','advance') | Should Be 0 }
             $dispatchId = Start-Task $project $taskId
@@ -317,6 +320,18 @@ Describe 'manage-workflow lifecycle' {
         Invoke-Manager @('-Action','audit','-ProjectPath',$project) | Should Be 0
         $tasks = @(Get-Content (Join-Path $project '.codex-orchestrator\tasks.json') -Raw | ConvertFrom-Json | ForEach-Object { $_ })
         @($tasks | Where-Object { $_.status -eq 'completed' -and $_.verified }).Count | Should Be 4
+    }
+
+    It 'allows exactly one scope-preserving repair task' {
+        Invoke-Manager @('-Action','initialize','-ProjectPath',$project,'-WorkflowId','WF-001') | Should Be 0
+        Invoke-Manager @('-Action','register','-ProjectPath',$project,'-TaskId','ANALYSIS-001','-ThreadId','thread-1','-Role','analyst','-Objective','analyze') | Should Be 0
+        Invoke-Manager @('-Action','register','-ProjectPath',$project,'-TaskId','DEV-001','-ThreadId','thread-2','-Role','developer','-Objective','develop','-Authorization','implementation-approved','-DependsOn','ANALYSIS-001','-AllowedFiles','src/app.ps1') | Should Be 0
+        Invoke-Manager @('-Action','transition','-ProjectPath',$project,'-TaskId','DEV-001','-ToStatus','failed','-Reason','test failure') | Should Be 0
+        Invoke-Manager @('-Action','register','-ProjectPath',$project,'-TaskId','DEV-002','-ThreadId','thread-3','-Role','developer','-Objective','repair','-Authorization','implementation-approved','-DependsOn','ANALYSIS-001','-AllowedFiles','src/app.ps1','-RepairOf','DEV-001') | Should Be 0
+        (Get-Task $project 'DEV-001').repair_count | Should Be 1
+        (Get-Task $project 'DEV-002').repair_of | Should Be 'DEV-001'
+        Invoke-Manager @('-Action','register','-ProjectPath',$project,'-TaskId','DEV-003','-ThreadId','thread-4','-Role','developer','-Objective','second repair','-Authorization','implementation-approved','-DependsOn','ANALYSIS-001','-AllowedFiles','src/app.ps1','-RepairOf','DEV-001') | Should Be 1
+        Invoke-Manager @('-Action','register','-ProjectPath',$project,'-TaskId','DEV-004','-ThreadId','thread-5','-Role','developer','-Objective','expanded repair','-Authorization','implementation-approved','-DependsOn','ANALYSIS-001','-AllowedFiles','src/app.ps1,src/extra.ps1','-RepairOf','DEV-001') | Should Be 1
     }
 
     It 'does not overwrite valid state when another controller holds the lock' {

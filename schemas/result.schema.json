@@ -3,7 +3,7 @@
   "$id": "result.schema.json",
   "type": "object",
   "additionalProperties": false,
-  "required": ["task_id", "dispatch_id", "thread_id", "host_id", "project_path", "base_revision", "end_revision", "summary", "preexisting_changes", "changed_files", "commands", "checks", "artifacts", "unexecuted", "blockers", "risks", "required_authorization", "created_at", "normalization"],
+  "required": ["task_id", "dispatch_id", "thread_id", "host_id", "project_path", "base_revision", "end_revision", "summary", "preexisting_changes", "changed_files", "commands", "checks", "artifacts", "unexecuted", "blockers", "risks", "required_authorization", "created_at", "stage_evidence", "normalization"],
   "properties": {
     "task_id": {"type": "string"}, "dispatch_id": {"type": "string", "minLength": 1}, "thread_id": {"type": "string", "minLength": 1}, "host_id": {"type": "string", "minLength": 1}, "project_path": {"type": "string"},
     "base_revision": {"type": "string", "minLength": 1}, "end_revision": {"type": "string", "minLength": 1}, "summary": {"type": "string", "minLength": 1},
@@ -14,6 +14,18 @@
     "artifacts": {"type": "array", "items": {"type": "string"}}, "unexecuted": {"type": "array", "items": {"type": "string"}},
     "blockers": {"type": "array", "items": {"type": "string"}}, "risks": {"type": "array", "items": {"type": "string"}},
     "required_authorization": {"type": ["string", "null"]}, "created_at": {"type": "string", "format": "date-time"},
+    "stage_evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["role", "outcome", "inspected_revision", "criteria", "findings"],
+      "properties": {
+        "role": {"enum": ["analyst", "developer", "tester", "reviewer"]},
+        "outcome": {"enum": ["passed", "failed", "blocked"]},
+        "inspected_revision": {"type": "string", "minLength": 1},
+        "criteria": {"type": "array", "uniqueItems": true, "items": {"enum": ["plan_ready", "implementation_complete", "tests_executed", "code_review_complete"]}},
+        "findings": {"type": "array", "items": {"type": "string", "minLength": 1}}
+      }
+    },
     "normalization": {
       "type": "object",
       "additionalProperties": false,

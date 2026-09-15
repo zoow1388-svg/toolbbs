@@ -16,5 +16,7 @@
 8. 使用 `result.schema.json` 和 `scripts/validate-result.ps1` 校验，并传入预期任务、派发和窗口 ID。失败时停止门禁并报告字段路径。
 9. 关键结论仍需总控用 Git、文件或命令输出独立复核；Schema 通过不等于任务通过。
 10. 校验通过后使用 `scripts/render-result.ps1` 生成面向用户的 UTF-8 Markdown；不要把机器 JSON 直接粘贴给用户。
+11. 填写 `stage_evidence`：角色必须来自任务登记，`inspected_revision` 必须等于 `end_revision`，`outcome` 只能依据实际证据填写。
+12. 角色完成标准固定为：分析 `plan_ready`、开发 `implementation_complete`、测试 `tests_executed`、审查 `code_review_complete`。测试必须记录至少一项通过检查；审查发现未清零时不得标记通过。
 
 规范化是总控职责，不计入任务返修次数。只有事实缺失、相互矛盾或证据不足时，才允许一次定向返修。

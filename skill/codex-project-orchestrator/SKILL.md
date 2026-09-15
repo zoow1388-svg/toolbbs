@@ -21,10 +21,10 @@ Coordinate Codex tasks through supported task tools. Never use window titles, mo
 10. Require the worker to send the dispatch callback with `send_message_to_thread` before ending its completion turn. Save the incoming message, normalize it with `import-callback-receipt.ps1`, record it with `record-callback`, send the planned `callback_ack` to the worker, and preserve that tool receipt with `record-callback-ack`. Treat repeated callback event IDs as idempotent; reject mismatched task, dispatch, source, target, or host identities.
 11. Read a result only when the snapshot reports both `latest_turn_status=completed` and `latest_item_phase=final_answer`. Then save a fresh `read_thread` response and use `extract-thread-result.ps1` with those exact IDs. Record the extracted result with the matching task ID, dispatch ID, thread ID, item ID, and cursor. Reject commentary, in-progress turns, and old or mismatched results by following [task-protocol.md](references/task-protocol.md).
 12. Preserve the extracted report unchanged, then normalize it into JSON by following [result-normalization.md](references/result-normalization.md). Never ask the executing task to invent JSON syntax or silently fill missing facts.
-13. Run `verify-result` with the normalized result. This invokes the deterministic validator with the registered identities and creates an immutable verification receipt; never use `transition -Verified` or edit a receipt.
+13. Include role-specific `stage_evidence` in the normalized result, then run `verify-result`. The validator binds the evidence to the registered role, ending revision, checks, blockers, and developer file ownership before creating an immutable receipt; never use `transition -Verified` or edit a receipt.
 14. Run the manager `audit` action, then generate the user-facing UTF-8 Markdown with `scripts/render-result.ps1`. Never expose raw machine JSON as the final user report.
 15. Independently verify Git revision, changed files, commands, tests, and artifacts. A task saying "complete" is not proof.
-16. Advance through analysis, implementation, test, and review gates. Complete a task only after trusted result verification and callback acknowledgement both succeed. Stop on missing evidence, stale results, conflicts, scope expansion, or new authorization requirements.
+16. Advance through analysis, implementation, test, and review gates. Require every dependency revision to match the receiving task baseline. Complete a task only after trusted result verification and callback acknowledgement both succeed. Stop on missing evidence, stale results, conflicts, scope expansion, or new authorization requirements.
 17. Produce a truthful delivery report. Mark unexecuted checks as `未执行`.
 
 Before choosing an operational step, run `plan-next-actions.ps1` for the whole workflow. Validate the saved plan with `test-action-plan-current.ps1` immediately before executing any listed action. Regenerate it when the event sequence or state hashes change. The plan describes actions but never authorizes them.
@@ -46,6 +46,8 @@ When resuming, prefer `plan-next-actions.ps1` for workflow-wide decisions. Keep 
 Save raw send receipts, wait responses, and thread reads inside the target project's state directory. Record their paths and hashes. Treat send message IDs as optional and record them only when the host actually returns them; result item IDs are required because full-result extraction is exact.
 
 Do not automatically commit, push, deploy, delete, migrate data, install software, restart services, or use real credentials. Do not overwrite user changes. Allow at most one targeted factual repair with an identified cause; formatting normalization is the controller's responsibility and must not consume a repair attempt.
+
+Register a repair with a new task ID and `-RepairOf`. Preserve its source role, dependencies, authorization, and file boundary. A second repair or expanded scope requires a new analysis and user decision.
 
 ## State placement
 

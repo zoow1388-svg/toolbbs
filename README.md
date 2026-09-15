@@ -120,3 +120,11 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File '.\skill\codex-project-o
 ```
 
 随后使用 `record-callback` 记账，按动作计划向执行任务发送 `callback_ack`，并用 `record-callback-ack` 保存真实发送回执。任务只有同时满足可信结果验证和回传 ACK 才能完成；重复事件不会重复记账或再次派发。
+
+## v1.0 四角色交付链
+
+分析、开发、测试、审查现在使用角色专属证据门禁。规范化结果必须声明 `stage_evidence`，且角色、检查的代码修订和完成标准必须与登记任务一致；失败检查、阻塞项、审查遗留问题或开发越出 `allowed_files` 都会拒绝完成。
+
+每个后续派发信封保存依赖任务的 `end_revision`。多个依赖必须指向同一修订，且该修订必须等于新任务的 `base_revision`，防止测试或审查检查错误版本。
+
+失败或阻塞任务可登记一次 `repair_of` 返修任务。返修必须保持相同角色、依赖和授权，文件范围只能缩小不能扩大；第二次返修会关闭门禁并要求重新分析。
