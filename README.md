@@ -1,6 +1,18 @@
-# Codex Project Orchestrator
+# 自动化多窗口项目总控
 
-这是一个面向 Codex 桌面版的多任务总控 Skill。项目当前只在 D 盘开发，不会自动安装到全局 Skill 目录。
+这是一个面向 Codex 桌面版的自动化多窗口项目总控 Skill：让一个总控任务通过不可变任务 ID 协调多个 Codex 任务，完成分析、开发、测试、审查、结果回传和中断恢复。项目当前只在 D 盘开发，不会自动安装到全局 Skill 目录。
+
+## v1.4.1 安装与升级
+
+正式安装包包含 Skill、安装器、可恢复卸载器、文件清单和 SHA-256 校验值。普通用户请按照 [`docs/INSTALL.md`](docs/INSTALL.md) 操作。安装不需要 Python、`jsonschema` 或 PyYAML。
+
+开发环境生成安装包：
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File '.\installer\build-release.ps1'
+```
+
+构建产物写入 D 盘项目的 `dist/` 并由 Git 忽略，不会自动安装、提交或上传。
 
 ## 本地验证
 

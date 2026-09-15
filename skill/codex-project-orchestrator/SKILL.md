@@ -3,7 +3,7 @@ name: codex-project-orchestrator
 description: Coordinate multiple Codex desktop tasks for one project by inspecting project structure, registering task IDs, planning dependencies, dispatching approved work, collecting structured results, and enforcing analysis, implementation, test, and review gates. Use when a user asks one Codex task to manage, read, wait for, or assign work to other Codex tasks or windows in an automated project workflow.
 ---
 
-# Codex Project Orchestrator
+# 自动化多窗口项目总控
 
 Coordinate Codex tasks through supported task tools. Never use window titles, mouse position, or UI focus as identity.
 

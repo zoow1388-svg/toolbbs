@@ -1,5 +1,6 @@
 .codex-orchestrator/
 .validation-deps/
 TestResults/
+dist/
 *.tmp
 *.log

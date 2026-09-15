@@ -1,4 +1,4 @@
 interface:
-  display_name: "Codex ��Ŀ�ܿ�"
-  short_description: "Э��ͬһ��Ŀ�Ķ�� Codex ����ִ�н׶��Ž�"
-  default_prompt: "ʹ�� $codex-project-orchestrator ������ǰ��Ŀ�����ɰ�ȫ�Ķ������������޸�ǰ���ύ�������ȴ�ȷ�ϡ�"
+  display_name: "自动化多窗口项目总控"
+  short_description: "让一个总控任务自动协调多个 Codex 窗口完成项目开发、测试与审查"
+  default_prompt: "使用 $codex-project-orchestrator，让当前任务作为总控，自动协调多个 Codex 任务完成项目分析、开发、测试与审查；修改前先提交方案并等待确认。"
