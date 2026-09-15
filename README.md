@@ -44,7 +44,17 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File '.\skill\codex-project-o
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File '.\skill\codex-project-orchestrator\scripts\manage-workflow.ps1' -Action prepare-dispatch -ProjectPath 'D:\目标项目' -TaskId 'ANALYSIS-001'
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File '.\skill\codex-project-orchestrator\scripts\manage-workflow.ps1' -Action record-sent -ProjectPath 'D:\目标项目' -TaskId 'ANALYSIS-001' -DispatchId '返回的派发编号' -MessageId '任务工具返回的消息编号' -Cursor '任务工具返回的游标'
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File '.\skill\codex-project-orchestrator\scripts\manage-workflow.ps1' -Action record-sent -ProjectPath 'D:\目标项目' -TaskId 'ANALYSIS-001' -DispatchId '返回的派发编号' -ReceiptPath 'D:\目标项目\.codex-orchestrator\receipts\发送回执.json' -Cursor '任务工具返回的游标'
 ```
 
 中断恢复时运行 `-Action reconcile`。它只输出下一步决策，不会自行发送消息；真正的跨窗口读取和发送仍由 Codex 桌面版受支持的任务工具完成。
+
+## v0.4 Codex 原生任务适配
+
+从派发信封生成不可覆盖的标准提示词：
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File '.\skill\codex-project-orchestrator\scripts\build-dispatch-prompt.ps1' -DispatchPath 'D:\目标项目\.codex-orchestrator\dispatches\派发编号.json' -OutputPath 'D:\目标项目\.codex-orchestrator\dispatches\派发编号.md'
+```
+
+总控使用 Codex 原生任务工具发送提示词，并把原始返回值保存到 `receipts` 后调用 `record-sent`。消息 ID 仅在工具真实返回时传入；任务观察使用 `record-observation` 保存状态和增量游标。

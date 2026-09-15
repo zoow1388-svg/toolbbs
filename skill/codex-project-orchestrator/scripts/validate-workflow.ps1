@@ -45,7 +45,7 @@ foreach ($task in $tasks) {
     if ($task.PSObject.Properties.Match('delivery_status').Count -gt 0) {
         if ($task.delivery_status -notin @('not-prepared','prepared','sent','acknowledged','result_received')) { Add-ValidationError "$context invalid delivery_status: $($task.delivery_status)" }
         if ($task.delivery_status -ne 'not-prepared' -and [string]::IsNullOrWhiteSpace($task.dispatch_id)) { Add-ValidationError "$context delivery requires dispatch_id" }
-        if ($task.delivery_status -in @('sent','acknowledged','result_received') -and [string]::IsNullOrWhiteSpace($task.sent_message_id)) { Add-ValidationError "$context delivery requires sent_message_id" }
+        if ($task.delivery_status -in @('sent','acknowledged','result_received') -and ([string]::IsNullOrWhiteSpace($task.send_receipt_path) -or [string]::IsNullOrWhiteSpace($task.send_receipt_sha256))) { Add-ValidationError "$context delivery requires send receipt evidence" }
         if ($task.delivery_status -eq 'result_received' -and [string]::IsNullOrWhiteSpace($task.result_message_id)) { Add-ValidationError "$context result_received requires result_message_id" }
     }
 }

@@ -12,7 +12,8 @@ function Get-Task([string]$Project,[string]$TaskId) {
 function Start-Task([string]$Project,[string]$TaskId) {
     Invoke-Manager @('-Action','prepare-dispatch','-ProjectPath',$Project,'-TaskId',$TaskId) | Should Be 0 | Out-Null
     $dispatchId = (Get-Task $Project $TaskId).dispatch_id
-    Invoke-Manager @('-Action','record-sent','-ProjectPath',$Project,'-TaskId',$TaskId,'-DispatchId',$dispatchId,'-MessageId',"sent-$TaskId",'-Cursor',"cursor-sent-$TaskId") | Should Be 0 | Out-Null
+    $receipt = Join-Path $Project "$TaskId.send-receipt.json"; Set-Content $receipt '{"sent":true}'
+    Invoke-Manager @('-Action','record-sent','-ProjectPath',$Project,'-TaskId',$TaskId,'-DispatchId',$dispatchId,'-ReceiptPath',$receipt,'-MessageId',"sent-$TaskId",'-Cursor',"cursor-sent-$TaskId") | Should Be 0 | Out-Null
     Invoke-Manager @('-Action','record-ack','-ProjectPath',$Project,'-TaskId',$TaskId,'-DispatchId',$dispatchId,'-Cursor',"cursor-ack-$TaskId") | Should Be 0 | Out-Null
     return $dispatchId
 }
@@ -32,7 +33,7 @@ Describe 'manage-workflow lifecycle' {
     It 'initializes versioned state and an event log' {
         Invoke-Manager @('-Action','initialize','-ProjectPath',$project,'-WorkflowId','WF-001') | Should Be 0
         $workflow = Get-Content (Join-Path $project '.codex-orchestrator\workflow.json') -Raw | ConvertFrom-Json
-        $workflow.state_version | Should Be 3
+        $workflow.state_version | Should Be 4
         $workflow.event_sequence | Should Be 1
         @(Get-Content (Join-Path $project '.codex-orchestrator\events.jsonl')).Count | Should Be 1
     }
@@ -114,18 +115,18 @@ Describe 'manage-workflow lifecycle' {
         Set-Content (Join-Path $state 'tasks.json') '[]'
         Invoke-Manager @('-Action','register','-ProjectPath',$project,'-TaskId','ANALYSIS-001','-ThreadId','thread-1','-Role','analyst','-Objective','analyze') | Should Be 0
         $workflow = Get-Content (Join-Path $state 'workflow.json') -Raw | ConvertFrom-Json
-        $workflow.state_version | Should Be 3
+        $workflow.state_version | Should Be 4
         $workflow.event_sequence | Should Be 1
     }
 
-    It 'upgrades v0.2 state to v0.3 without manual edits' {
+    It 'upgrades v0.2 state to the current version without manual edits' {
         $state = Join-Path $project '.codex-orchestrator'; New-Item -ItemType Directory -Path $state | Out-Null
         $now = (Get-Date).ToUniversalTime().ToString('o')
         [pscustomobject]@{workflow_id='WF-V2';project_path=$project;state_version=2;status='draft';current_stage='analysis';authorization='read-only';event_sequence=0;created_at=$now;updated_at=$now} | ConvertTo-Json | Set-Content (Join-Path $state 'workflow.json')
         Set-Content (Join-Path $state 'tasks.json') '[]'
         Invoke-Manager @('-Action','register','-ProjectPath',$project,'-TaskId','ANALYSIS-001','-ThreadId','thread-1','-Role','analyst','-Objective','analyze') | Should Be 0
         $workflow = Get-Content (Join-Path $state 'workflow.json') -Raw | ConvertFrom-Json
-        $workflow.state_version | Should Be 3
+        $workflow.state_version | Should Be 4
         (Get-Task $project 'ANALYSIS-001').delivery_status | Should Be 'not-prepared'
     }
 
@@ -171,13 +172,37 @@ Describe 'manage-workflow lifecycle' {
         Invoke-Manager @('-Action','prepare-dispatch','-ProjectPath',$project,'-TaskId','ANALYSIS-001') | Should Be 0
         Get-ReconcileDecision $project 'ANALYSIS-001' | Should Be 'send_prepared_dispatch'
         $dispatchId = (Get-Task $project 'ANALYSIS-001').dispatch_id
-        Invoke-Manager @('-Action','record-sent','-ProjectPath',$project,'-TaskId','ANALYSIS-001','-DispatchId',$dispatchId,'-MessageId','sent-1','-Cursor','cursor-1') | Should Be 0
+        $receipt = Join-Path $project 'send-receipt.json'; Set-Content $receipt '{"sent":true}'
+        Invoke-Manager @('-Action','record-sent','-ProjectPath',$project,'-TaskId','ANALYSIS-001','-DispatchId',$dispatchId,'-ReceiptPath',$receipt,'-MessageId','sent-1','-Cursor','cursor-1') | Should Be 0
         Get-ReconcileDecision $project 'ANALYSIS-001' | Should Be 'wait_for_acknowledgement'
         Invoke-Manager @('-Action','record-ack','-ProjectPath',$project,'-TaskId','ANALYSIS-001','-DispatchId',$dispatchId,'-Cursor','cursor-2') | Should Be 0
         Get-ReconcileDecision $project 'ANALYSIS-001' | Should Be 'wait_for_result'
         $raw = Join-Path $project 'raw.md'; Set-Content $raw 'raw'
         Invoke-Manager @('-Action','record-result','-ProjectPath',$project,'-TaskId','ANALYSIS-001','-DispatchId',$dispatchId,'-ThreadId','thread-1','-ResultMessageId','result-1','-Cursor','cursor-3','-RawResultPath',$raw) | Should Be 0
         Get-ReconcileDecision $project 'ANALYSIS-001' | Should Be 'validate_received_result'
+    }
+
+    It 'records a real send receipt without inventing a message id and detects tampering' {
+        Invoke-Manager @('-Action','initialize','-ProjectPath',$project,'-WorkflowId','WF-001') | Should Be 0
+        Invoke-Manager @('-Action','register','-ProjectPath',$project,'-TaskId','ANALYSIS-001','-ThreadId','thread-1','-Role','analyst','-Objective','analyze') | Should Be 0
+        foreach($state in @('awaiting_approval','approved')){Invoke-Manager @('-Action','transition','-ProjectPath',$project,'-TaskId','ANALYSIS-001','-ToStatus',$state,'-Reason','advance')|Should Be 0}
+        Invoke-Manager @('-Action','prepare-dispatch','-ProjectPath',$project,'-TaskId','ANALYSIS-001') | Should Be 0
+        $dispatchId=(Get-Task $project 'ANALYSIS-001').dispatch_id
+        $receipt=Join-Path $project 'receipt.json'; Set-Content $receipt '{"accepted":true}'
+        Invoke-Manager @('-Action','record-sent','-ProjectPath',$project,'-TaskId','ANALYSIS-001','-DispatchId',$dispatchId,'-ReceiptPath',$receipt,'-Cursor','cursor-1') | Should Be 0
+        $task=Get-Task $project 'ANALYSIS-001'; $task.sent_message_id | Should Be $null; $task.send_receipt_sha256.Length | Should Be 64
+        Invoke-Manager @('-Action','audit','-ProjectPath',$project)|Should Be 0
+        Add-Content $receipt 'tampered'
+        Invoke-Manager @('-Action','audit','-ProjectPath',$project)|Should Be 1
+    }
+
+    It 'records matching native thread observations and rejects project mismatch' {
+        Invoke-Manager @('-Action','initialize','-ProjectPath',$project,'-WorkflowId','WF-001') | Should Be 0
+        Invoke-Manager @('-Action','register','-ProjectPath',$project,'-TaskId','ANALYSIS-001','-ThreadId','thread-1','-Role','analyst','-Objective','analyze') | Should Be 0
+        $observation=Join-Path $project 'observation.json'; Set-Content $observation '{"status":"idle"}'
+        Invoke-Manager @('-Action','record-observation','-ProjectPath',$project,'-TaskId','ANALYSIS-001','-ThreadId','thread-1','-HostId','local','-ObservedProjectPath',$project,'-ObservedStatus','idle','-Cursor','cursor-observed','-ObservationPath',$observation)|Should Be 0
+        $task=Get-Task $project 'ANALYSIS-001'; $task.observed_status|Should Be 'idle'; $task.read_cursor|Should Be 'cursor-observed'
+        Invoke-Manager @('-Action','record-observation','-ProjectPath',$project,'-TaskId','ANALYSIS-001','-ThreadId','thread-1','-HostId','local','-ObservedProjectPath','D:\wrong-project','-ObservedStatus','idle','-ObservationPath',$observation)|Should Be 1
     }
 
     It 'runs the complete analysis development test and review dependency chain' {

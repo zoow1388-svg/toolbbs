@@ -16,7 +16,9 @@
 - 只读任务可并行，但不得读取或展示敏感数据。
 - 同一任务不得重复派发；派发时记录事件和时间戳。
 - 投递状态依次为 `not-prepared → prepared → sent → acknowledged → result_received`；每次派发使用唯一 `dispatch_id`。
-- 只有宿主任务工具返回消息 ID 后才能记录 `sent`；读取结果时保存游标，拒绝错误任务、窗口或派发编号。
+- 只有宿主任务工具返回成功回执后才能记录 `sent`；读取结果时保存游标，拒绝错误任务、窗口或派发编号。
+- 消息 ID 不是必需证据；无论宿主是否返回消息 ID，都必须保存原始发送回执并记录 SHA-256。
+- 每次 `list_threads`、`read_thread` 或 `wait_threads` 的关键观察应保存原始响应，通过 `record-observation` 核对任务、主机、项目路径和游标。
 - 最多等待八个任务；使用返回游标避免重复处理旧结果。
 - 使用 `manage-workflow.ps1` 执行初始化、登记、迁移、读取和审计；不得手改运行状态。
 - 合法主路径是 `draft → awaiting_approval → approved → dispatched → running → verifying → completed`。

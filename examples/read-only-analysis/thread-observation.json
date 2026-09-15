@@ -1,0 +1,11 @@
+{
+  "thread_id": "example-thread",
+  "host_id": "local",
+  "project_path": "D:\\example-project",
+  "status": "idle",
+  "cursor": "example-cursor",
+  "source": "wait_threads",
+  "observed_at": "2026-09-15T00:02:00+08:00",
+  "raw_response_path": "D:\\example-project\\.codex-orchestrator\\observations\\example.json",
+  "raw_response_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+}

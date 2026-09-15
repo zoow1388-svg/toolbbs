@@ -51,3 +51,7 @@
 ## v0.3 任务连接与恢复
 
 每次派发先生成不可变 `dispatch.json`，再由 Codex 原生任务工具发送。状态层记录 `dispatch_id`、消息 ID、读取游标和 `prepared → sent → acknowledged → result_received` 投递状态。结果必须同时匹配任务、窗口和派发编号；恢复命令只给出继续发送、等待确认、等待结果、验证结果或人工检查中的一种确定决策，不自动重复派发。
+
+## v0.4 原生任务适配
+
+总控先预检 `list_threads`、`read_thread`、`send_message_to_thread` 和 `wait_threads`。脚本从派发信封生成不可覆盖的提示词，但不直接调用宿主工具。发送回执与任务观察原样保存在项目状态目录并记录 SHA-256；消息 ID 为可选字段，读取游标是增量等待依据。任务、主机或项目路径不一致时关闭门禁。

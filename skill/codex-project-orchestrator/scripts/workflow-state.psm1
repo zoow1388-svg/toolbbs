@@ -66,8 +66,11 @@ function Add-Defaults {
         foreach ($name in @('dispatch_path','sent_message_id','result_message_id','read_cursor','dispatched_at','acknowledged_at','result_received_at')) {
             if ($task.PSObject.Properties.Match($name).Count -eq 0) { Add-Member -InputObject $task -NotePropertyName $name -NotePropertyValue $null }
         }
+        foreach ($name in @('send_receipt_path','send_receipt_sha256','observation_path','observation_sha256','observed_status','observed_at')) {
+            if ($task.PSObject.Properties.Match($name).Count -eq 0) { Add-Member -InputObject $task -NotePropertyName $name -NotePropertyValue $null }
+        }
     }
-    if ([int]$Workflow.state_version -lt 3) { $Workflow.state_version = 3 }
+    if ([int]$Workflow.state_version -lt 4) { $Workflow.state_version = 4 }
 }
 
 function Write-Event {
@@ -86,7 +89,7 @@ function Initialize-WorkflowState {
         $workflowPath = Join-Path $state 'workflow.json'
         if (Test-Path -LiteralPath $workflowPath) { throw 'Workflow already exists.' }
         $now = Get-UtcTimestamp
-        $workflow = [ordered]@{ workflow_id=$WorkflowId; project_path=$resolved; state_version=3; status='draft'; current_stage='analysis'; authorization='read-only'; event_sequence=0; created_at=$now; updated_at=$now }
+        $workflow = [ordered]@{ workflow_id=$WorkflowId; project_path=$resolved; state_version=4; status='draft'; current_stage='analysis'; authorization='read-only'; event_sequence=0; created_at=$now; updated_at=$now }
         $tasks = @()
         Write-Event $state $workflow 'workflow_initialized' $null $null 'draft' 'initialization'
         Write-JsonAtomic $workflow $workflowPath
@@ -112,7 +115,7 @@ function Register-WorkflowTask {
         $activeFiles = @($tasks | Where-Object { $_.role -eq 'developer' -and $_.status -notin $script:TerminalStates } | ForEach-Object { $_.allowed_files })
         $overlap = @($AllowedFiles | Where-Object { $_ -in $activeFiles })
         if ($Role -eq 'developer' -and $overlap.Count -gt 0) { throw "File ownership conflict: $($overlap -join ', ')" }
-        $task = [ordered]@{ task_id=$TaskId; thread_id=$ThreadId; host_id=$HostId; role=$Role; status='draft'; depends_on=@($DependsOn); project_path=$workflow.project_path; base_revision=$BaseRevision; allowed_files=@($AllowedFiles); objective=$Objective; authorization=$Authorization; repair_count=0; dispatch_count=0; dispatch_id=$null; delivery_status='not-prepared'; dispatch_path=$null; sent_message_id=$null; result_message_id=$null; read_cursor=$null; dispatched_at=$null; acknowledged_at=$null; result_received_at=$null; raw_result_path=$null; normalized_result_path=$null; verified=$false; updated_at=(Get-UtcTimestamp) }
+        $task = [ordered]@{ task_id=$TaskId; thread_id=$ThreadId; host_id=$HostId; role=$Role; status='draft'; depends_on=@($DependsOn); project_path=$workflow.project_path; base_revision=$BaseRevision; allowed_files=@($AllowedFiles); objective=$Objective; authorization=$Authorization; repair_count=0; dispatch_count=0; dispatch_id=$null; delivery_status='not-prepared'; dispatch_path=$null; sent_message_id=$null; send_receipt_path=$null; send_receipt_sha256=$null; result_message_id=$null; read_cursor=$null; observation_path=$null; observation_sha256=$null; observed_status=$null; observed_at=$null; dispatched_at=$null; acknowledged_at=$null; result_received_at=$null; raw_result_path=$null; normalized_result_path=$null; verified=$false; updated_at=(Get-UtcTimestamp) }
         $tasks += [pscustomobject]$task
         Write-Event $state $workflow 'task_registered' $TaskId $null 'draft' 'registration'
         $workflow.updated_at = Get-UtcTimestamp; Write-JsonAtomic $workflow $workflowPath; Write-JsonAtomic $tasks $tasksPath
@@ -145,7 +148,7 @@ function New-WorkflowDispatch {
 }
 
 function Confirm-WorkflowDispatchSent {
-    param([string]$ProjectPath,[string]$TaskId,[string]$DispatchId,[string]$MessageId,[string]$Cursor)
+    param([string]$ProjectPath,[string]$TaskId,[string]$DispatchId,[string]$ReceiptPath,[string]$MessageId,[string]$Cursor)
     $state = Join-Path ([System.IO.Path]::GetFullPath($ProjectPath)) '.codex-orchestrator'
     Invoke-WithStateLock $state {
         $workflowPath = Join-Path $state 'workflow.json'; $tasksPath = Join-Path $state 'tasks.json'
@@ -154,10 +157,31 @@ function Confirm-WorkflowDispatchSent {
         if ($task.Count -ne 1) { throw "Task not found: $TaskId" }; $task = $task[0]
         if ($task.status -ne 'approved' -or $task.delivery_status -ne 'prepared') { throw 'Task is not waiting for send confirmation.' }
         if ($task.dispatch_id -ne $DispatchId) { throw 'Dispatch ID does not match the prepared dispatch.' }
-        if ([string]::IsNullOrWhiteSpace($MessageId)) { throw 'MessageId is required.' }
-        $task.sent_message_id=$MessageId; $task.read_cursor=$Cursor; $task.delivery_status='sent'; $task.dispatched_at=Get-UtcTimestamp; $task.dispatch_count=[int]$task.dispatch_count+1; $task.status='dispatched'; $task.updated_at=Get-UtcTimestamp
+        if ([string]::IsNullOrWhiteSpace($ReceiptPath) -or -not (Test-Path -LiteralPath $ReceiptPath)) { throw 'A raw send receipt file is required.' }
+        $resolvedReceipt=[IO.Path]::GetFullPath($ReceiptPath); $receiptHash=(Get-FileHash -LiteralPath $resolvedReceipt -Algorithm SHA256).Hash.ToLowerInvariant()
+        $task.sent_message_id=$(if([string]::IsNullOrWhiteSpace($MessageId)){$null}else{$MessageId}); $task.send_receipt_path=$resolvedReceipt; $task.send_receipt_sha256=$receiptHash; $task.read_cursor=$Cursor; $task.delivery_status='sent'; $task.dispatched_at=Get-UtcTimestamp; $task.dispatch_count=[int]$task.dispatch_count+1; $task.status='dispatched'; $task.updated_at=Get-UtcTimestamp
         $stageByRole = @{ analyst='analysis'; developer='implementation'; tester='test'; reviewer='review' }; $workflow.current_stage=$stageByRole[[string]$task.role]; $workflow.status='running'
         Write-Event $state $workflow 'dispatch_sent' $TaskId 'prepared' 'sent' $MessageId
+        $workflow.updated_at=Get-UtcTimestamp; Write-JsonAtomic $workflow $workflowPath; Write-JsonAtomic $tasks $tasksPath
+    }
+}
+
+function Record-WorkflowThreadObservation {
+    param([string]$ProjectPath,[string]$TaskId,[string]$ThreadId,[string]$HostId,[string]$ObservedProjectPath,[string]$ObservedStatus,[string]$Cursor,[string]$ObservationPath)
+    $state=Join-Path ([IO.Path]::GetFullPath($ProjectPath)) '.codex-orchestrator'
+    Invoke-WithStateLock $state {
+        $workflowPath=Join-Path $state 'workflow.json'; $tasksPath=Join-Path $state 'tasks.json'
+        $workflow=Read-StateJson $workflowPath; $tasks=@(Read-StateJson $tasksPath|ForEach-Object{$_}); Add-Defaults $workflow $tasks
+        $task=@($tasks|Where-Object{$_.task_id -eq $TaskId}); if($task.Count -ne 1){throw "Task not found: $TaskId"}; $task=$task[0]
+        if($task.thread_id -ne $ThreadId){throw 'Thread observation does not match the assigned thread.'}
+        if($task.host_id -ne $HostId){throw 'Thread observation does not match the assigned host.'}
+        if([IO.Path]::GetFullPath($task.project_path) -ne [IO.Path]::GetFullPath($ObservedProjectPath)){throw 'Thread observation project path does not match the workflow.'}
+        if($ObservedStatus -notin @('active','idle','completed','needs_attention','unavailable','unknown')){throw 'Unsupported observed thread status.'}
+        if([string]::IsNullOrWhiteSpace($ObservationPath) -or -not(Test-Path -LiteralPath $ObservationPath)){throw 'A raw observation file is required.'}
+        $resolvedObservation=[IO.Path]::GetFullPath($ObservationPath)
+        $task.observation_path=$resolvedObservation; $task.observation_sha256=(Get-FileHash -LiteralPath $resolvedObservation -Algorithm SHA256).Hash.ToLowerInvariant(); $task.observed_status=$ObservedStatus; $task.observed_at=Get-UtcTimestamp
+        if(-not [string]::IsNullOrWhiteSpace($Cursor)){$task.read_cursor=$Cursor}; $task.updated_at=Get-UtcTimestamp
+        Write-Event $state $workflow 'thread_observed' $TaskId $null $ObservedStatus $Cursor
         $workflow.updated_at=Get-UtcTimestamp; Write-JsonAtomic $workflow $workflowPath; Write-JsonAtomic $tasks $tasksPath
     }
 }
@@ -218,7 +242,7 @@ function Set-WorkflowTaskState {
         if ($task.Count -ne 1) { throw "Task not found: $TaskId" }; $task = $task[0]; $from = [string]$task.status
         if (-not $script:Transitions.ContainsKey($from) -or $ToStatus -notin $script:Transitions[$from]) { throw "Illegal transition: $from -> $ToStatus" }
         if ($ToStatus -eq 'dispatched') {
-            if ([int]$workflow.state_version -ge 3) { throw 'Use prepare-dispatch and record-sent for v0.3 dispatches.' }
+            if ([int]$workflow.state_version -ge 3) { throw 'Use prepare-dispatch and record-sent for managed dispatches.' }
             foreach ($dependency in @($task.depends_on)) { $dep = @($tasks | Where-Object { $_.task_id -eq $dependency }); if ($dep.Count -ne 1 -or $dep[0].status -ne 'completed' -or -not $dep[0].verified) { throw "Dependency is not verified complete: $dependency" } }
             if ([int]$task.dispatch_count -gt 0) { throw 'Task was already dispatched.' }
             $task.dispatch_count = [int]$task.dispatch_count + 1
@@ -256,7 +280,9 @@ function Test-WorkflowStateIntegrity {
     if (@($tasks | Group-Object thread_id | Where-Object Count -gt 1).Count -gt 0) { throw 'Duplicate thread_id detected.' }
     foreach ($task in $tasks) {
         if ($task.delivery_status -ne 'not-prepared' -and ([string]::IsNullOrWhiteSpace($task.dispatch_id) -or [string]::IsNullOrWhiteSpace($task.dispatch_path) -or -not (Test-Path -LiteralPath $task.dispatch_path))) { throw "Task dispatch evidence is incomplete: $($task.task_id)" }
-        if ($task.delivery_status -in @('sent','acknowledged','result_received') -and ([string]::IsNullOrWhiteSpace($task.sent_message_id) -or [string]::IsNullOrWhiteSpace($task.dispatched_at))) { throw "Task send evidence is incomplete: $($task.task_id)" }
+        if ($task.delivery_status -in @('sent','acknowledged','result_received') -and ([string]::IsNullOrWhiteSpace($task.send_receipt_path) -or [string]::IsNullOrWhiteSpace($task.send_receipt_sha256) -or -not(Test-Path -LiteralPath $task.send_receipt_path) -or [string]::IsNullOrWhiteSpace($task.dispatched_at))) { throw "Task send evidence is incomplete: $($task.task_id)" }
+        if(-not [string]::IsNullOrWhiteSpace($task.send_receipt_path) -and ((Get-FileHash -LiteralPath $task.send_receipt_path -Algorithm SHA256).Hash.ToLowerInvariant() -ne $task.send_receipt_sha256)){throw "Task send receipt hash mismatch: $($task.task_id)"}
+        if(-not [string]::IsNullOrWhiteSpace($task.observation_path) -and ((Get-FileHash -LiteralPath $task.observation_path -Algorithm SHA256).Hash.ToLowerInvariant() -ne $task.observation_sha256)){throw "Task observation hash mismatch: $($task.task_id)"}
         if ($task.delivery_status -in @('acknowledged','result_received') -and [string]::IsNullOrWhiteSpace($task.acknowledged_at)) { throw "Task acknowledgement evidence is incomplete: $($task.task_id)" }
         if ($task.delivery_status -eq 'result_received' -and ([string]::IsNullOrWhiteSpace($task.result_message_id) -or [string]::IsNullOrWhiteSpace($task.result_received_at) -or -not (Test-Path -LiteralPath $task.raw_result_path))) { throw "Task result evidence is incomplete: $($task.task_id)" }
     }
@@ -271,4 +297,4 @@ function Get-WorkflowState {
     [ordered]@{ workflow=(Read-StateJson (Join-Path $state 'workflow.json')); tasks=@(Read-StateJson (Join-Path $state 'tasks.json') | ForEach-Object { $_ }) }
 }
 
-Export-ModuleMember -Function Initialize-WorkflowState,Register-WorkflowTask,Set-WorkflowTaskState,New-WorkflowDispatch,Confirm-WorkflowDispatchSent,Confirm-WorkflowAcknowledged,Receive-WorkflowResult,Get-WorkflowReconciliation,Get-WorkflowState,Test-WorkflowStateIntegrity
+Export-ModuleMember -Function Initialize-WorkflowState,Register-WorkflowTask,Set-WorkflowTaskState,New-WorkflowDispatch,Confirm-WorkflowDispatchSent,Confirm-WorkflowAcknowledged,Receive-WorkflowResult,Record-WorkflowThreadObservation,Get-WorkflowReconciliation,Get-WorkflowState,Test-WorkflowStateIntegrity
