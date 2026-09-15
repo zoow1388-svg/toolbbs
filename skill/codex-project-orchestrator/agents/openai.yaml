@@ -1,0 +1,4 @@
+interface:
+  display_name: "Codex 项目总控"
+  short_description: "协调同一项目的多个 Codex 任务并执行阶段门禁"
+  default_prompt: "使用 $codex-project-orchestrator 分析当前项目，生成安全的多任务工作流；修改前先提交方案并等待确认。"

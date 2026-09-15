@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "result.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["task_id", "thread_id", "host_id", "project_path", "base_revision", "end_revision", "summary", "preexisting_changes", "changed_files", "commands", "checks", "artifacts", "unexecuted", "blockers", "risks", "required_authorization", "created_at", "normalization"],
+  "properties": {
+    "task_id": {"type": "string"}, "thread_id": {"type": "string", "minLength": 1}, "host_id": {"type": "string", "minLength": 1}, "project_path": {"type": "string"},
+    "base_revision": {"type": "string"}, "end_revision": {"type": "string"}, "summary": {"type": "string"},
+    "preexisting_changes": {"type": "array", "items": {"type": "string"}},
+    "changed_files": {"type": "array", "items": {"type": "string"}},
+    "commands": {"type": "array", "items": {"type": "object", "required": ["command", "exit_code", "result"], "properties": {"command": {"type": "string"}, "exit_code": {"type": "integer"}, "result": {"type": "string"}}}},
+    "checks": {"type": "array", "items": {"type": "object", "required": ["name", "status"], "properties": {"name": {"type": "string"}, "status": {"enum": ["passed", "failed", "not-run"]}}}},
+    "artifacts": {"type": "array", "items": {"type": "string"}}, "unexecuted": {"type": "array", "items": {"type": "string"}},
+    "blockers": {"type": "array", "items": {"type": "string"}}, "risks": {"type": "array", "items": {"type": "string"}},
+    "required_authorization": {"type": ["string", "null"]}, "created_at": {"type": "string", "format": "date-time"},
+    "normalization": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["normalized_by", "source_thread_id", "source_message_id", "source_format", "decisions"],
+      "properties": {
+        "normalized_by": {"const": "controller"},
+        "source_thread_id": {"type": "string", "minLength": 1},
+        "source_message_id": {"type": "string", "minLength": 1},
+        "source_format": {"enum": ["markdown", "text", "json"]},
+        "decisions": {"type": "array", "items": {"type": "string"}}
+      }
+    }
+  }
+}

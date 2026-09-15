@@ -1,0 +1,8 @@
+[
+  {
+    "task_id": "ANALYSIS-001", "thread_id": "example-thread", "host_id": "local", "role": "analyst",
+    "status": "approved", "depends_on": [], "project_path": "D:\\example-project", "base_revision": "unborn",
+    "allowed_files": [], "objective": "只读分析项目结构", "authorization": "read-only", "repair_count": 0,
+    "updated_at": "2026-09-15T00:00:00+08:00"
+  }
+]

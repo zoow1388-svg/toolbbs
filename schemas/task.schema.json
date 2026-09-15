@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "task.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["task_id", "thread_id", "host_id", "role", "status", "depends_on", "project_path", "base_revision", "allowed_files", "objective", "authorization", "repair_count", "updated_at"],
+  "properties": {
+    "task_id": {"type": "string", "pattern": "^[A-Z]+-[0-9]{3,}$"},
+    "thread_id": {"type": "string", "minLength": 1},
+    "host_id": {"type": "string", "minLength": 1},
+    "role": {"enum": ["analyst", "developer", "tester", "reviewer"]},
+    "status": {"enum": ["draft", "awaiting_approval", "approved", "dispatched", "running", "verifying", "completed", "blocked", "failed", "cancelled", "stale"]},
+    "depends_on": {"type": "array", "uniqueItems": true, "items": {"type": "string"}},
+    "project_path": {"type": "string", "pattern": "^[A-Za-z]:\\\\"},
+    "base_revision": {"type": "string", "minLength": 1},
+    "allowed_files": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+    "objective": {"type": "string", "minLength": 1},
+    "authorization": {"enum": ["read-only", "plan-approved", "implementation-approved", "test-approved", "git-approved", "deployment-approved"]},
+    "repair_count": {"type": "integer", "minimum": 0, "maximum": 1},
+    "updated_at": {"type": "string", "format": "date-time"}
+  }
+}

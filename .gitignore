@@ -1,0 +1,5 @@
+.codex-orchestrator/
+.validation-deps/
+TestResults/
+*.tmp
+*.log
