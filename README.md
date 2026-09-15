@@ -27,3 +27,13 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File '.\skill\codex-project-o
 ```
 
 登记任务时，`DependsOn` 和 `AllowedFiles` 使用逗号分隔。运行 `-Action audit` 可检查事件序号、状态一致性和中断写入残留。运行状态保存在目标项目的 `.codex-orchestrator` 中并默认由 Git 忽略。
+
+## v0.2.1 结果双输出
+
+验证机器 JSON 并生成 UTF-8 中文报告：
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File '.\skill\codex-project-orchestrator\scripts\render-result.ps1' -ResultPath 'D:\目标项目\.codex-orchestrator\results\TEST-001.json' -OutputPath 'D:\目标项目\.codex-orchestrator\results\TEST-001.md' -ProjectPath 'D:\目标项目'
+```
+
+机器 JSON 不直接展示给用户；字段错误或 Git 基线过期时，渲染会失败并指出字段路径。

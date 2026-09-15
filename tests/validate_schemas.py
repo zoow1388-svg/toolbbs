@@ -37,4 +37,14 @@ except jsonschema.ValidationError:
 else:
     raise AssertionError("Invalid repair_count unexpectedly passed validation")
 
-print("SCHEMA VALID: 4 positive, 1 negative")
+invalid_result = copy.deepcopy(pairs["result"])
+invalid_result["changed_files"] = [{"scope": "this-task", "files": []}]
+result_schema = load_json(SCHEMAS / "result.schema.json")
+try:
+    jsonschema.validate(invalid_result, result_schema)
+except jsonschema.ValidationError:
+    pass
+else:
+    raise AssertionError("Object changed_files entry unexpectedly passed validation")
+
+print("SCHEMA VALID: 4 positive, 2 negative")

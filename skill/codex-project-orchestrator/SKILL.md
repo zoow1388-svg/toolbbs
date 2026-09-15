@@ -18,7 +18,7 @@ Coordinate Codex tasks through supported task tools. Never use window titles, mo
 7. Dispatch only approved tasks. Do not interpret design approval as implementation, Git, deployment, deletion, or external-action approval.
 8. Inject the assigned task ID, Codex thread ID, and host ID into every dispatch. Wait for a factual report containing the fields in [task-protocol.md](references/task-protocol.md).
 9. Preserve the report unchanged, then normalize it into JSON by following [result-normalization.md](references/result-normalization.md). Never ask the executing task to invent JSON syntax or silently fill missing facts.
-10. Run the manager `audit` action and validate normalized results with JSON Schema before advancing a gate.
+10. Run the manager `audit` action, validate normalized results with JSON Schema and `scripts/validate-result.ps1`, then generate the user-facing UTF-8 Markdown with `scripts/render-result.ps1`. Never expose raw machine JSON as the final user report.
 11. Independently verify Git revision, changed files, commands, tests, and artifacts. A task saying "complete" is not proof.
 12. Advance through analysis, implementation, test, and review gates. Stop on missing evidence, stale results, conflicts, scope expansion, or new authorization requirements.
 13. Produce a truthful delivery report. Mark unexecuted checks as `未执行`.

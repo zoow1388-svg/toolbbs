@@ -18,6 +18,8 @@
 
 总控必须保留原始回报，并按 [result-normalization.md](result-normalization.md) 生成可校验 JSON。格式问题由总控规范化，不应要求执行任务反复返工；事实缺失才属于返修。
 
+规范化 JSON 是机器交换文件，不得直接作为面向用户的最终回报。总控必须先运行 `scripts/validate-result.ps1`；通过后再用 `scripts/render-result.ps1` 生成 UTF-8 中文 Markdown。校验失败或 Git 基线过期时，停止门禁并显示具体字段路径。
+
 ## 回报必须包含
 
 - 任务编号、实际项目路径、`thread_id` 和 `host_id`
