@@ -28,7 +28,7 @@ function Get-ReconcileDecision([string]$Project,[string]$TaskId) {
 function Complete-CallbackHandshake([string]$Project,[string]$TaskId) {
     $state=Get-Content (Join-Path $Project '.codex-orchestrator\workflow.json') -Raw -Encoding UTF8|ConvertFrom-Json
     $task=Get-Task $Project $TaskId
-    $callback=[ordered]@{type='completion_callback';event_id=$task.callback_event_id;workflow_id=$state.workflow_id;task_id=$task.task_id;dispatch_id=$task.dispatch_id;source_thread_id=$task.thread_id;source_host_id=$task.host_id;target_thread_id=$state.controller_thread_id;target_host_id=$state.controller_host_id;status='completed'}
+    $callback=[ordered]@{type='completion_callback';event_id=$task.callback_event_id;workflow_id=$state.workflow_id;task_id=$task.task_id;dispatch_id=$task.dispatch_id;source_thread_id=$task.thread_id;source_host_id=$task.host_id;target_thread_id=$task.callback_target_thread_id;target_host_id=$task.callback_target_host_id;status='completed'}
     $receipt=Join-Path $Project "$TaskId.callback.json";[IO.File]::WriteAllText($receipt,($callback|ConvertTo-Json -Compress),[Text.UTF8Encoding]::new($false))
     Invoke-Manager @('-Action','record-callback','-ProjectPath',$Project,'-TaskId',$TaskId,'-CallbackEventId',$task.callback_event_id,'-ReceiptPath',$receipt)|Should Be 0|Out-Null
     $ack=Join-Path $Project "$TaskId.callback-ack.json";[IO.File]::WriteAllText($ack,(@{threadId=$task.thread_id}|ConvertTo-Json -Compress),[Text.UTF8Encoding]::new($false))
@@ -58,7 +58,7 @@ Describe 'manage-workflow lifecycle' {
     It 'initializes versioned state and an event log' {
         Invoke-Manager @('-Action','initialize','-ProjectPath',$project,'-WorkflowId','WF-001') | Should Be 0
         $workflow = Get-Content (Join-Path $project '.codex-orchestrator\workflow.json') -Raw | ConvertFrom-Json
-        $workflow.state_version | Should Be 9
+        $workflow.state_version | Should Be 10
         $workflow.controller_thread_id | Should Be 'controller-1'
         $workflow.event_sequence | Should Be 1
         @(Get-Content (Join-Path $project '.codex-orchestrator\events.jsonl')).Count | Should Be 1
@@ -74,9 +74,36 @@ Describe 'manage-workflow lifecycle' {
         $state=Join-Path $project '.codex-orchestrator';New-Item -ItemType Directory $state|Out-Null;$now=(Get-Date).ToUniversalTime().ToString('o')
         @{workflow_id='WF-OLD';project_path=$project;state_version=7;status='draft';current_stage='analysis';authorization='read-only';event_sequence=0;created_at=$now;updated_at=$now}|ConvertTo-Json|Set-Content (Join-Path $state 'workflow.json');Set-Content (Join-Path $state 'tasks.json') '[]';Set-Content (Join-Path $state 'events.jsonl') -Value @()
         Invoke-Manager @('-Action','configure-controller','-ProjectPath',$project,'-ControllerThreadId','controller-new')|Should Be 0
-        $workflow=Get-Content (Join-Path $state 'workflow.json') -Raw|ConvertFrom-Json;$workflow.controller_thread_id|Should Be 'controller-new';$workflow.state_version|Should Be 9
+        $workflow=Get-Content (Join-Path $state 'workflow.json') -Raw|ConvertFrom-Json;$workflow.controller_thread_id|Should Be 'controller-new';$workflow.state_version|Should Be 10
         Invoke-Manager @('-Action','configure-controller','-ProjectPath',$project,'-ControllerThreadId','controller-new')|Should Be 0
         Invoke-Manager @('-Action','configure-controller','-ProjectPath',$project,'-ControllerThreadId','controller-other')|Should Be 1
+    }
+
+    It 'takes over one controller lease without rewriting an existing dispatch' {
+        Invoke-Manager @('-Action','initialize','-ProjectPath',$project,'-WorkflowId','WF-001') | Should Be 0
+        Invoke-Manager @('-Action','register','-ProjectPath',$project,'-TaskId','ANALYSIS-001','-ThreadId','thread-1','-Role','analyst','-Objective','analyze') | Should Be 0
+        foreach($status in @('awaiting_approval','approved')){Invoke-Manager @('-Action','transition','-ProjectPath',$project,'-TaskId','ANALYSIS-001','-ToStatus',$status,'-Reason','advance')|Should Be 0}
+        $null=Start-Task $project 'ANALYSIS-001'
+        $before=Get-Task $project 'ANALYSIS-001';$dispatchBefore=Get-Content $before.dispatch_path -Raw -Encoding UTF8
+        $before.callback_target_thread_id | Should Be 'controller-1';$before.dispatch_controller_epoch | Should Be 1
+        Invoke-Manager @('-Action','takeover-controller','-ProjectPath',$project,'-ExpectedControllerThreadId','controller-1','-ExpectedControllerEpoch','1','-ControllerThreadId','controller-2','-TakeoverReason','original controller unavailable') | Should Be 0
+        $workflow=Get-Content (Join-Path $project '.codex-orchestrator\workflow.json') -Raw -Encoding UTF8|ConvertFrom-Json
+        $workflow.controller_thread_id|Should Be 'controller-2';$workflow.controller_epoch|Should Be 2;@($workflow.controller_history).Count|Should Be 1;$workflow.controller_history[0].thread_id|Should Be 'controller-1'
+        $after=Get-Task $project 'ANALYSIS-001';$after.callback_target_thread_id|Should Be 'controller-1';$after.dispatch_controller_epoch|Should Be 1
+        (Get-Content $after.dispatch_path -Raw -Encoding UTF8)|Should Be $dispatchBefore
+        Invoke-Manager @('-Action','takeover-controller','-ProjectPath',$project,'-ExpectedControllerThreadId','controller-1','-ExpectedControllerEpoch','1','-ControllerThreadId','controller-3','-TakeoverReason','stale contender') | Should Be 1
+        Complete-CallbackHandshake $project 'ANALYSIS-001'
+        (Get-Task $project 'ANALYSIS-001').callback_status|Should Be 'acknowledged'
+        Invoke-Manager @('-Action','register','-ProjectPath',$project,'-TaskId','ANALYSIS-002','-ThreadId','thread-2','-Role','analyst','-Objective','new work')|Should Be 0
+        foreach($status in @('awaiting_approval','approved')){Invoke-Manager @('-Action','transition','-ProjectPath',$project,'-TaskId','ANALYSIS-002','-ToStatus',$status,'-Reason','advance')|Should Be 0}
+        Invoke-Manager @('-Action','prepare-dispatch','-ProjectPath',$project,'-TaskId','ANALYSIS-002')|Should Be 0
+        $newTask=Get-Task $project 'ANALYSIS-002';$newTask.callback_target_thread_id|Should Be 'controller-2';$newTask.dispatch_controller_epoch|Should Be 2
+        Invoke-Manager @('-Action','audit','-ProjectPath',$project) | Should Be 0
+    }
+
+    It 'rejects using one identity as controller and worker' {
+        Invoke-Manager @('-Action','initialize','-ProjectPath',$project,'-WorkflowId','WF-001') | Should Be 0
+        Invoke-Manager @('-Action','register','-ProjectPath',$project,'-TaskId','ANALYSIS-001','-ThreadId','controller-1','-Role','analyst','-Objective','invalid') | Should Be 1
     }
 
     It 'rejects duplicate task ids and insufficient role authorization' {
@@ -158,7 +185,7 @@ Describe 'manage-workflow lifecycle' {
         Set-Content (Join-Path $state 'tasks.json') '[]'
         Invoke-Manager @('-Action','register','-ProjectPath',$project,'-TaskId','ANALYSIS-001','-ThreadId','thread-1','-Role','analyst','-Objective','analyze') | Should Be 0
         $workflow = Get-Content (Join-Path $state 'workflow.json') -Raw | ConvertFrom-Json
-        $workflow.state_version | Should Be 9
+        $workflow.state_version | Should Be 10
         $workflow.event_sequence | Should Be 1
     }
 
@@ -169,7 +196,7 @@ Describe 'manage-workflow lifecycle' {
         Set-Content (Join-Path $state 'tasks.json') '[]'
         Invoke-Manager @('-Action','register','-ProjectPath',$project,'-TaskId','ANALYSIS-001','-ThreadId','thread-1','-Role','analyst','-Objective','analyze') | Should Be 0
         $workflow = Get-Content (Join-Path $state 'workflow.json') -Raw | ConvertFrom-Json
-        $workflow.state_version | Should Be 9
+        $workflow.state_version | Should Be 10
         (Get-Task $project 'ANALYSIS-001').delivery_status | Should Be 'not-prepared'
     }
 
@@ -182,7 +209,7 @@ Describe 'manage-workflow lifecycle' {
         foreach($name in @('normalized_result_sha256','verification_receipt_path','verification_receipt_sha256','verified_at','latest_turn_status','latest_item_phase')){$tasks[0].PSObject.Properties.Remove($name)}
         $tasks|ConvertTo-Json -Depth 20|Set-Content (Join-Path $state 'tasks.json')
         Invoke-Manager @('-Action','transition','-ProjectPath',$project,'-TaskId','ANALYSIS-001','-ToStatus','awaiting_approval','-Reason','upgrade') | Should Be 0
-        (Get-Content (Join-Path $state 'workflow.json') -Raw|ConvertFrom-Json).state_version | Should Be 9
+        (Get-Content (Join-Path $state 'workflow.json') -Raw|ConvertFrom-Json).state_version | Should Be 10
         $upgraded=Get-Task $project 'ANALYSIS-001';$upgraded.PSObject.Properties.Name -contains 'verification_receipt_path' | Should Be $true;$upgraded.PSObject.Properties.Name -contains 'latest_turn_status'|Should Be $true;$upgraded.latest_item_phase|Should Be $null
     }
 

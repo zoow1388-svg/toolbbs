@@ -3,6 +3,7 @@
 ## 派发必须包含
 
 - `task_id`、`dispatch_id`、角色和目标
+- 派发时的总控任期
 - 项目绝对路径、Codex `thread_id`、`host_id` 与 Git 基线
 - 依赖任务及其已验证 `end_revision`
 - 允许读取和修改的范围

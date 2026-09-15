@@ -19,7 +19,7 @@ function Write-NormalizedResult([string]$Path,[string]$Project,[string]$Dispatch
 }
 function Write-CallbackReceipt([string]$Project,[string]$TaskId){
     $workflow=Get-Content (Join-Path $Project '.codex-orchestrator\workflow.json') -Raw -Encoding UTF8|ConvertFrom-Json;$task=Read-Task $Project $TaskId
-    $value=[ordered]@{type='completion_callback';event_id=$task.callback_event_id;workflow_id=$workflow.workflow_id;task_id=$task.task_id;dispatch_id=$task.dispatch_id;source_thread_id=$task.thread_id;source_host_id=$task.host_id;target_thread_id=$workflow.controller_thread_id;target_host_id=$workflow.controller_host_id;status='completed'}
+    $value=[ordered]@{type='completion_callback';event_id=$task.callback_event_id;workflow_id=$workflow.workflow_id;task_id=$task.task_id;dispatch_id=$task.dispatch_id;source_thread_id=$task.thread_id;source_host_id=$task.host_id;target_thread_id=$task.callback_target_thread_id;target_host_id=$task.callback_target_host_id;status='completed'}
     $path=Join-Path $Project 'callback.json';[IO.File]::WriteAllText($path,($value|ConvertTo-Json -Compress),[Text.UTF8Encoding]::new($false));$path
 }
 
@@ -44,10 +44,19 @@ Describe 'workflow action planner' {
         (Invoke-Tool $currentCheck @('-ProjectPath',$project,'-PlanPath',$path)).ExitCode|Should Be 1
     }
 
+    It 'invalidates an old action plan after controller takeover' {
+        Invoke-Manager @('-Action','register','-ProjectPath',$project,'-TaskId','ANALYSIS-001','-ThreadId','thread-1','-Role','analyst','-Objective','analyze')|Should Be 0
+        $path=Join-Path $project 'old-controller-plan.json';$plan=New-Plan $project $path
+        $plan.schema_version|Should Be 2;$plan.controller_epoch|Should Be 1;$plan.controller_thread_id|Should Be 'controller-1'
+        Invoke-Manager @('-Action','takeover-controller','-ProjectPath',$project,'-ExpectedControllerThreadId','controller-1','-ExpectedControllerEpoch','1','-ControllerThreadId','controller-2','-TakeoverReason','controller replacement')|Should Be 0
+        (Invoke-Tool $currentCheck @('-ProjectPath',$project,'-PlanPath',$path)).ExitCode|Should Be 1
+        $newPlan=New-Plan $project (Join-Path $project 'new-controller-plan.json');$newPlan.controller_epoch|Should Be 2;$newPlan.controller_thread_id|Should Be 'controller-2'
+    }
+
     It 'stops dispatch planning until a controller identity is configured' {
+        $project=Join-Path $TestDrive ([guid]::NewGuid().ToString('N'));New-Item -ItemType Directory $project|Out-Null
+        Invoke-Manager @('-Action','initialize','-ProjectPath',$project,'-WorkflowId','WF-NO-CONTROLLER')|Should Be 0
         Invoke-Manager @('-Action','register','-ProjectPath',$project,'-TaskId','ANALYSIS-001','-ThreadId','thread-1','-Role','analyst','-Objective','analyze')|Should Be 0;Approve-Task $project 'ANALYSIS-001'
-        $workflowPath=Join-Path $project '.codex-orchestrator\workflow.json';$workflow=Get-Content $workflowPath -Raw -Encoding UTF8|ConvertFrom-Json;$workflow.controller_thread_id=$null;$workflow.controller_host_id=$null
-        [IO.File]::WriteAllText($workflowPath,($workflow|ConvertTo-Json -Depth 20),[Text.UTF8Encoding]::new($false))
         $plan=New-Plan $project (Join-Path $project 'missing-controller.json');$plan.actions[0].type|Should Be 'manual_review';$plan.actions[0].operation|Should Be 'configure_controller'
     }
 

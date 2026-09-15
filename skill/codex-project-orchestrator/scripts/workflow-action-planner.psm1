@@ -25,7 +25,7 @@ function New-WorkflowActionPlan {
     function Add-Action([string]$Type,[object[]]$TaskIds,[string]$Operation,$Parameters,[string[]]$Evidence,[bool]$StateChanging,$Authorization,[string]$Reason){
         $key=$(if($TaskIds.Count -eq 0){'workflow'}else{($TaskIds -join '+')})
         $actions.Add([pscustomobject][ordered]@{
-            action_id="$($workflow.workflow_id):$sequence`:$Type`:$key";type=$Type;task_ids=@($TaskIds)
+            action_id="$($workflow.workflow_id):$($workflow.controller_epoch):$sequence`:$Type`:$key";type=$Type;task_ids=@($TaskIds)
             based_on_event_sequence=$sequence;operation=$Operation;parameters=$Parameters;evidence_required=@($Evidence)
             state_changing=$StateChanging;authorization_required=$Authorization;reason=$Reason
         })
@@ -86,7 +86,7 @@ function New-WorkflowActionPlan {
                 if($task.callback_status -eq 'acknowledged'){
                     Add-Action 'complete_task' @($task.task_id) 'manage-workflow:transition' ([ordered]@{task_id=$task.task_id;to_status='completed';reason='trusted verification and callback acknowledgement passed'}) @('trusted verification receipt','callback acknowledgement receipt','successful audit') $true $null 'Trusted verification and acknowledged callback allow completion.'
                 }else{
-                    Add-Action 'wait_callback' @($task.task_id) 'yield_controller' ([ordered]@{callback_event_id=$task.callback_event_id;controller_thread_id=$workflow.controller_thread_id}) @('matching completion callback') $false $null 'Verified result cannot complete until the worker callback is received and acknowledged.'
+                    Add-Action 'wait_callback' @($task.task_id) 'yield_controller' ([ordered]@{callback_event_id=$task.callback_event_id;controller_thread_id=$task.callback_target_thread_id;controller_host_id=$task.callback_target_host_id}) @('matching completion callback') $false $null 'Verified result cannot complete until the worker callback is received and acknowledged.'
                 }
             }else{
                 $suggestedOutput=Join-Path $stateDirectory "results\$($task.task_id).json"
@@ -108,7 +108,7 @@ function New-WorkflowActionPlan {
         Add-Action 'workflow_complete' @() 'report_completion' ([ordered]@{workflow_id=$workflow.workflow_id}) @('successful workflow audit','final delivery report') $false $null 'Every task is trusted complete.'
     }
     [pscustomobject][ordered]@{
-        schema_version=1;workflow_id=$workflow.workflow_id;project_path=$resolvedProject;based_on_event_sequence=$sequence
+        schema_version=2;workflow_id=$workflow.workflow_id;project_path=$resolvedProject;controller_thread_id=$workflow.controller_thread_id;controller_host_id=$workflow.controller_host_id;controller_epoch=[int64]$workflow.controller_epoch;based_on_event_sequence=$sequence
         workflow_state_sha256=(Get-FileSha256 $workflowPath);tasks_state_sha256=(Get-FileSha256 $tasksPath)
         generated_at=(Get-Date).ToUniversalTime().ToString('o');actions=@($actions)
     }

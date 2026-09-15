@@ -60,6 +60,8 @@ function Add-Defaults {
     foreach ($name in @('controller_thread_id','controller_host_id')) {
         if ($Workflow.PSObject.Properties.Match($name).Count -eq 0) { Add-Member -InputObject $Workflow -NotePropertyName $name -NotePropertyValue $null }
     }
+    if($Workflow.PSObject.Properties.Match('controller_epoch').Count -eq 0){Add-Member -InputObject $Workflow -NotePropertyName controller_epoch -NotePropertyValue $(if([string]::IsNullOrWhiteSpace([string]$Workflow.controller_thread_id)){0}else{1})}
+    if($Workflow.PSObject.Properties.Match('controller_history').Count -eq 0){Add-Member -InputObject $Workflow -NotePropertyName controller_history -NotePropertyValue @()}
     foreach ($task in $Tasks) {
         if($task.PSObject.Properties.Match('repair_of').Count -eq 0){Add-Member -InputObject $task -NotePropertyName repair_of -NotePropertyValue $null}
         if ($task.PSObject.Properties.Match('dispatch_count').Count -eq 0) { Add-Member -InputObject $task -NotePropertyName dispatch_count -NotePropertyValue 0 }
@@ -80,6 +82,9 @@ function Add-Defaults {
         foreach ($name in @('callback_event_id','callback_receipt_path','callback_receipt_sha256','callback_received_at','callback_ack_receipt_path','callback_ack_receipt_sha256','callback_acknowledged_at')) {
             if ($task.PSObject.Properties.Match($name).Count -eq 0) { Add-Member -InputObject $task -NotePropertyName $name -NotePropertyValue $null }
         }
+        if($task.PSObject.Properties.Match('callback_target_thread_id').Count -eq 0){Add-Member -InputObject $task -NotePropertyName callback_target_thread_id -NotePropertyValue $(if([string]::IsNullOrWhiteSpace([string]$task.callback_event_id)){$null}else{$Workflow.controller_thread_id})}
+        if($task.PSObject.Properties.Match('callback_target_host_id').Count -eq 0){Add-Member -InputObject $task -NotePropertyName callback_target_host_id -NotePropertyValue $(if([string]::IsNullOrWhiteSpace([string]$task.callback_event_id)){$null}else{$Workflow.controller_host_id})}
+        if($task.PSObject.Properties.Match('dispatch_controller_epoch').Count -eq 0){Add-Member -InputObject $task -NotePropertyName dispatch_controller_epoch -NotePropertyValue $(if([string]::IsNullOrWhiteSpace([string]$task.callback_event_id)){$null}else{[int64]$Workflow.controller_epoch})}
         if($task.PSObject.Properties.Match('callback_status').Count -eq 0){Add-Member -InputObject $task -NotePropertyName callback_status -NotePropertyValue 'not-prepared'}
         if($task.PSObject.Properties.Match('wait_revision').Count -eq 0){Add-Member -InputObject $task -NotePropertyName wait_revision -NotePropertyValue $null}
         if($task.PSObject.Properties.Match('result_truncated').Count -eq 0){Add-Member -InputObject $task -NotePropertyName result_truncated -NotePropertyValue $false}
@@ -88,7 +93,7 @@ function Add-Defaults {
             Add-Member -InputObject $task -NotePropertyName verification_status -NotePropertyValue $verificationStatus
         }
     }
-    if ([int]$Workflow.state_version -lt 9) { $Workflow.state_version = 9 }
+    if ([int]$Workflow.state_version -lt 10) { $Workflow.state_version = 10 }
 }
 
 function Write-Event {
@@ -107,7 +112,7 @@ function Initialize-WorkflowState {
         $workflowPath = Join-Path $state 'workflow.json'
         if (Test-Path -LiteralPath $workflowPath) { throw 'Workflow already exists.' }
         $now = Get-UtcTimestamp
-        $workflow = [ordered]@{ workflow_id=$WorkflowId; project_path=$resolved; state_version=9; controller_thread_id=$(if([string]::IsNullOrWhiteSpace($ControllerThreadId)){$null}else{$ControllerThreadId}); controller_host_id=$(if([string]::IsNullOrWhiteSpace($ControllerThreadId)){$null}else{$ControllerHostId}); status='draft'; current_stage='analysis'; authorization='read-only'; event_sequence=0; created_at=$now; updated_at=$now }
+        $workflow = [ordered]@{ workflow_id=$WorkflowId; project_path=$resolved; state_version=10; controller_thread_id=$(if([string]::IsNullOrWhiteSpace($ControllerThreadId)){$null}else{$ControllerThreadId}); controller_host_id=$(if([string]::IsNullOrWhiteSpace($ControllerThreadId)){$null}else{$ControllerHostId}); controller_epoch=$(if([string]::IsNullOrWhiteSpace($ControllerThreadId)){0}else{1}); controller_history=@(); status='draft'; current_stage='analysis'; authorization='read-only'; event_sequence=0; created_at=$now; updated_at=$now }
         $tasks = @()
         Write-Event $state $workflow 'workflow_initialized' $null $null 'draft' 'initialization'
         Write-JsonAtomic $workflow $workflowPath
@@ -128,9 +133,32 @@ function Set-WorkflowController {
             throw 'Workflow controller identity is immutable once configured.'
         }
         if(@($tasks|Where-Object{$_.delivery_status -ne 'not-prepared'}).Count -gt 0){throw 'Controller identity must be configured before preparing dispatches.'}
+        if(@($tasks|Where-Object{$_.thread_id -eq $ControllerThreadId -and $_.host_id -eq $ControllerHostId}).Count -gt 0){throw 'Controller identity cannot also be a worker task.'}
         $workflow.controller_thread_id=$ControllerThreadId;$workflow.controller_host_id=$ControllerHostId
+        $workflow.controller_epoch=1
         Write-Event $state $workflow 'controller_configured' $null $null 'configured' $ControllerThreadId
         $workflow.updated_at=Get-UtcTimestamp;Write-JsonAtomic $workflow $workflowPath;Write-JsonAtomic $tasks $tasksPath
+    }
+}
+
+function Set-WorkflowControllerTakeover {
+    param([string]$ProjectPath,[string]$ExpectedControllerThreadId,[string]$ExpectedControllerHostId,[int64]$ExpectedControllerEpoch,[string]$ControllerThreadId,[string]$ControllerHostId='local',[string]$Reason)
+    foreach($value in @($ExpectedControllerThreadId,$ExpectedControllerHostId,$ControllerThreadId,$ControllerHostId,$Reason)){if([string]::IsNullOrWhiteSpace($value)){throw 'Expected controller, new controller, and reason are required.'}}
+    if($ExpectedControllerEpoch -lt 1){throw 'ExpectedControllerEpoch must be at least 1.'}
+    if($ExpectedControllerThreadId -eq $ControllerThreadId -and $ExpectedControllerHostId -eq $ControllerHostId){throw 'New controller must differ from the current controller.'}
+    $state=Join-Path ([IO.Path]::GetFullPath($ProjectPath)) '.codex-orchestrator'
+    Invoke-WithStateLock $state {
+        $workflowPath=Join-Path $state 'workflow.json';$tasksPath=Join-Path $state 'tasks.json'
+        $workflow=Read-StateJson $workflowPath;$tasks=@(Read-StateJson $tasksPath|ForEach-Object{$_});Add-Defaults $workflow $tasks
+        if(-not(Test-WorkflowStateIntegrity -ProjectPath $ProjectPath)){throw 'Workflow integrity audit failed before controller takeover.'}
+        if($workflow.controller_thread_id -ne $ExpectedControllerThreadId -or $workflow.controller_host_id -ne $ExpectedControllerHostId -or [int64]$workflow.controller_epoch -ne $ExpectedControllerEpoch){throw 'STALE_CONTROLLER_LEASE: controller identity or epoch changed.'}
+        if(@($tasks|Where-Object{$_.thread_id -eq $ControllerThreadId -and $_.host_id -eq $ControllerHostId}).Count -gt 0){throw 'Controller identity cannot also be a worker task.'}
+        $now=Get-UtcTimestamp
+        $history=@($workflow.controller_history)
+        $history += [pscustomobject][ordered]@{epoch=[int64]$workflow.controller_epoch;thread_id=$workflow.controller_thread_id;host_id=$workflow.controller_host_id;replaced_at=$now;reason=$Reason}
+        $workflow.controller_history=$history;$workflow.controller_thread_id=$ControllerThreadId;$workflow.controller_host_id=$ControllerHostId;$workflow.controller_epoch=[int64]$workflow.controller_epoch+1
+        Write-Event $state $workflow 'controller_taken_over' $null $ExpectedControllerThreadId $ControllerThreadId $Reason
+        $workflow.updated_at=$now;Write-JsonAtomic $workflow $workflowPath;Write-JsonAtomic $tasks $tasksPath
     }
 }
 
@@ -142,6 +170,7 @@ function Register-WorkflowTask {
         $workflow = Read-StateJson $workflowPath; $tasks = @(Read-StateJson $tasksPath | ForEach-Object { $_ }); Add-Defaults $workflow $tasks
         if (@($tasks | Where-Object { $_.task_id -eq $TaskId }).Count -gt 0) { throw "Duplicate task_id: $TaskId" }
         if (@($tasks | Where-Object { $_.thread_id -eq $ThreadId }).Count -gt 0) { throw "Duplicate thread_id: $ThreadId" }
+        if($workflow.controller_thread_id -eq $ThreadId -and $workflow.controller_host_id -eq $HostId){throw 'Worker task cannot use the controller identity.'}
         $repairSource=$null
         if(-not [string]::IsNullOrWhiteSpace($RepairOf)){
             $source=@($tasks|Where-Object{$_.task_id -eq $RepairOf});if($source.Count -ne 1){throw "Repair source not found: $RepairOf"};$repairSource=$source[0]
@@ -162,7 +191,7 @@ function Register-WorkflowTask {
         $activeFiles = @($tasks | Where-Object { $_.role -eq 'developer' -and $_.status -notin $script:TerminalStates } | ForEach-Object { $_.allowed_files })
         $overlap = @($AllowedFiles | Where-Object { $_ -in $activeFiles })
         if ($Role -eq 'developer' -and $overlap.Count -gt 0) { throw "File ownership conflict: $($overlap -join ', ')" }
-        $task = [ordered]@{ task_id=$TaskId; thread_id=$ThreadId; host_id=$HostId; role=$Role; repair_of=$(if([string]::IsNullOrWhiteSpace($RepairOf)){$null}else{$RepairOf}); status='draft'; depends_on=@($DependsOn); project_path=$workflow.project_path; base_revision=$BaseRevision; allowed_files=@($AllowedFiles); objective=$Objective; authorization=$Authorization; repair_count=0; dispatch_count=0; dispatch_id=$null; delivery_status='not-prepared'; dispatch_path=$null; sent_message_id=$null; send_receipt_path=$null; send_receipt_sha256=$null; result_message_id=$null; read_cursor=$null; wait_revision=$null; wait_snapshot_path=$null; wait_snapshot_sha256=$null; latest_turn_id=$null; latest_turn_status=$null; latest_item_id=$null; latest_item_phase=$null; result_truncated=$false; callback_event_id=$null; callback_status='not-prepared'; callback_receipt_path=$null; callback_receipt_sha256=$null; callback_received_at=$null; callback_ack_receipt_path=$null; callback_ack_receipt_sha256=$null; callback_acknowledged_at=$null; observation_path=$null; observation_sha256=$null; observed_status=$null; observed_at=$null; dispatched_at=$null; acknowledged_at=$null; result_received_at=$null; raw_result_path=$null; raw_result_sha256=$null; normalized_result_path=$null; normalized_result_sha256=$null; verification_receipt_path=$null; verification_receipt_sha256=$null; verification_status='unverified'; verified_at=$null; verified=$false; updated_at=(Get-UtcTimestamp) }
+        $task = [ordered]@{ task_id=$TaskId; thread_id=$ThreadId; host_id=$HostId; role=$Role; repair_of=$(if([string]::IsNullOrWhiteSpace($RepairOf)){$null}else{$RepairOf}); status='draft'; depends_on=@($DependsOn); project_path=$workflow.project_path; base_revision=$BaseRevision; allowed_files=@($AllowedFiles); objective=$Objective; authorization=$Authorization; repair_count=0; dispatch_count=0; dispatch_id=$null; delivery_status='not-prepared'; dispatch_path=$null; sent_message_id=$null; send_receipt_path=$null; send_receipt_sha256=$null; result_message_id=$null; read_cursor=$null; wait_revision=$null; wait_snapshot_path=$null; wait_snapshot_sha256=$null; latest_turn_id=$null; latest_turn_status=$null; latest_item_id=$null; latest_item_phase=$null; result_truncated=$false; callback_event_id=$null; callback_target_thread_id=$null; callback_target_host_id=$null; dispatch_controller_epoch=$null; callback_status='not-prepared'; callback_receipt_path=$null; callback_receipt_sha256=$null; callback_received_at=$null; callback_ack_receipt_path=$null; callback_ack_receipt_sha256=$null; callback_acknowledged_at=$null; observation_path=$null; observation_sha256=$null; observed_status=$null; observed_at=$null; dispatched_at=$null; acknowledged_at=$null; result_received_at=$null; raw_result_path=$null; raw_result_sha256=$null; normalized_result_path=$null; normalized_result_sha256=$null; verification_receipt_path=$null; verification_receipt_sha256=$null; verification_status='unverified'; verified_at=$null; verified=$false; updated_at=(Get-UtcTimestamp) }
         if($null -ne $repairSource){$repairSource.repair_count=[int]$repairSource.repair_count+1;$repairSource.updated_at=Get-UtcTimestamp}
         $tasks += [pscustomobject]$task
         Write-Event $state $workflow 'task_registered' $TaskId $null 'draft' 'registration'
@@ -195,10 +224,10 @@ function New-WorkflowDispatch {
         $dispatchId = "$TaskId-$([guid]::NewGuid().ToString('N'))"
         $callbackEventId="$dispatchId`:completion"
         $callback=[ordered]@{event_id=$callbackEventId;target_thread_id=$workflow.controller_thread_id;target_host_id=$workflow.controller_host_id;status='completed'}
-        $dispatch = [ordered]@{ dispatch_id=$dispatchId; workflow_id=$workflow.workflow_id; task_id=$task.task_id; thread_id=$task.thread_id; host_id=$task.host_id; role=$task.role; repair_of=$task.repair_of; project_path=$task.project_path; base_revision=$task.base_revision; objective=$task.objective; depends_on=@($task.depends_on); dependency_revisions=@($dependencyRevisions); allowed_files=@($task.allowed_files); authorization=$task.authorization; callback=$callback; created_at=(Get-UtcTimestamp) }
+        $dispatch = [ordered]@{ dispatch_id=$dispatchId; workflow_id=$workflow.workflow_id; controller_epoch=[int64]$workflow.controller_epoch; task_id=$task.task_id; thread_id=$task.thread_id; host_id=$task.host_id; role=$task.role; repair_of=$task.repair_of; project_path=$task.project_path; base_revision=$task.base_revision; objective=$task.objective; depends_on=@($task.depends_on); dependency_revisions=@($dependencyRevisions); allowed_files=@($task.allowed_files); authorization=$task.authorization; callback=$callback; created_at=(Get-UtcTimestamp) }
         $dispatchDirectory = Join-Path $state 'dispatches'; $dispatchPath = Join-Path $dispatchDirectory "$dispatchId.json"
         Write-JsonAtomic $dispatch $dispatchPath
-        $task.dispatch_id = $dispatchId; $task.dispatch_path = [System.IO.Path]::GetFullPath($dispatchPath); $task.delivery_status = 'prepared'; $task.callback_event_id=$callbackEventId;$task.callback_status='prepared';$task.updated_at = Get-UtcTimestamp
+        $task.dispatch_id = $dispatchId; $task.dispatch_path = [System.IO.Path]::GetFullPath($dispatchPath); $task.delivery_status = 'prepared'; $task.callback_event_id=$callbackEventId;$task.callback_target_thread_id=$workflow.controller_thread_id;$task.callback_target_host_id=$workflow.controller_host_id;$task.dispatch_controller_epoch=[int64]$workflow.controller_epoch;$task.callback_status='prepared';$task.updated_at = Get-UtcTimestamp
         Write-Event $state $workflow 'dispatch_prepared' $TaskId 'not-prepared' 'prepared' $dispatchId
         $workflow.updated_at = Get-UtcTimestamp; Write-JsonAtomic $workflow $workflowPath; Write-JsonAtomic $tasks $tasksPath
         [pscustomobject]$dispatch
@@ -294,7 +323,7 @@ function Receive-WorkflowCallback {
         $receipt=Read-StateJson $ReceiptPath
         $expected=@{
             event_id=$task.callback_event_id;workflow_id=$workflow.workflow_id;task_id=$task.task_id;dispatch_id=$task.dispatch_id
-            source_thread_id=$task.thread_id;source_host_id=$task.host_id;target_thread_id=$workflow.controller_thread_id;target_host_id=$workflow.controller_host_id;status='completed'
+            source_thread_id=$task.thread_id;source_host_id=$task.host_id;target_thread_id=$task.callback_target_thread_id;target_host_id=$task.callback_target_host_id;status='completed'
         }
         foreach($name in $expected.Keys){
             if($receipt.PSObject.Properties.Match($name).Count -eq 0 -or [string]$receipt.$name -ne [string]$expected[$name]){throw "Callback receipt identity mismatch: $name"}
@@ -439,6 +468,13 @@ function Test-WorkflowStateIntegrity {
     $workflow = Read-StateJson (Join-Path $state 'workflow.json')
     $tasks = @(Read-StateJson (Join-Path $state 'tasks.json') | ForEach-Object { $_ })
     Add-Defaults $workflow $tasks
+    if([string]::IsNullOrWhiteSpace([string]$workflow.controller_thread_id)){
+        if([int64]$workflow.controller_epoch -ne 0 -or @($workflow.controller_history).Count -ne 0){throw 'Unconfigured controller must have epoch 0 and empty history.'}
+    }else{
+        if([string]::IsNullOrWhiteSpace([string]$workflow.controller_host_id) -or [int64]$workflow.controller_epoch -lt 1){throw 'Configured controller identity or epoch is invalid.'}
+        if(@($workflow.controller_history).Count -ne ([int64]$workflow.controller_epoch-1)){throw 'Controller history does not match the current epoch.'}
+        for($historyIndex=0;$historyIndex -lt @($workflow.controller_history).Count;$historyIndex++){if([int64]$workflow.controller_history[$historyIndex].epoch -ne ($historyIndex+1)){throw 'Controller history epoch sequence is invalid.'}}
+    }
     $eventPath = Join-Path $state 'events.jsonl'
     if (-not (Test-Path -LiteralPath $eventPath)) { throw 'Event log not found.' }
     $events = @(Get-Content -LiteralPath $eventPath -Encoding UTF8 | Where-Object { $_ } | ForEach-Object { $_ | ConvertFrom-Json })
@@ -464,7 +500,7 @@ function Test-WorkflowStateIntegrity {
         if ($task.delivery_status -eq 'result_received' -and ([string]::IsNullOrWhiteSpace($task.result_message_id) -or [string]::IsNullOrWhiteSpace($task.result_received_at) -or -not (Test-Path -LiteralPath $task.raw_result_path))) { throw "Task result evidence is incomplete: $($task.task_id)" }
         if(-not [string]::IsNullOrWhiteSpace($task.raw_result_path) -and ((Get-FileHash -LiteralPath $task.raw_result_path -Algorithm SHA256).Hash.ToLowerInvariant() -ne $task.raw_result_sha256)){throw "Task raw result hash mismatch: $($task.task_id)"}
         if($task.callback_status -ne 'not-prepared'){
-            if([string]::IsNullOrWhiteSpace($workflow.controller_thread_id) -or [string]::IsNullOrWhiteSpace($workflow.controller_host_id) -or [string]::IsNullOrWhiteSpace($task.callback_event_id)){throw "Task callback identity is incomplete: $($task.task_id)"}
+            if([string]::IsNullOrWhiteSpace($task.callback_target_thread_id) -or [string]::IsNullOrWhiteSpace($task.callback_target_host_id) -or $null -eq $task.dispatch_controller_epoch -or [string]::IsNullOrWhiteSpace($task.callback_event_id)){throw "Task callback identity is incomplete: $($task.task_id)"}
         }
         if($task.callback_status -in @('received','acknowledged')){
             if([string]::IsNullOrWhiteSpace($task.callback_received_at) -or -not(Test-Path -LiteralPath $task.callback_receipt_path) -or (Get-FileHash -LiteralPath $task.callback_receipt_path -Algorithm SHA256).Hash.ToLowerInvariant() -ne $task.callback_receipt_sha256){throw "Task callback receipt mismatch: $($task.task_id)"}
@@ -492,4 +528,4 @@ function Get-WorkflowState {
     [ordered]@{workflow=$workflow;tasks=$tasks}
 }
 
-Export-ModuleMember -Function Initialize-WorkflowState,Set-WorkflowController,Register-WorkflowTask,Set-WorkflowTaskState,New-WorkflowDispatch,Confirm-WorkflowDispatchSent,Confirm-WorkflowAcknowledged,Receive-WorkflowCallback,Confirm-WorkflowCallbackAcknowledged,Receive-WorkflowResult,Confirm-WorkflowResultVerified,Record-WorkflowThreadObservation,Record-WorkflowWaitSnapshot,Get-WorkflowReconciliation,Get-WorkflowState,Test-WorkflowStateIntegrity
+Export-ModuleMember -Function Initialize-WorkflowState,Set-WorkflowController,Set-WorkflowControllerTakeover,Register-WorkflowTask,Set-WorkflowTaskState,New-WorkflowDispatch,Confirm-WorkflowDispatchSent,Confirm-WorkflowAcknowledged,Receive-WorkflowCallback,Confirm-WorkflowCallbackAcknowledged,Receive-WorkflowResult,Confirm-WorkflowResultVerified,Record-WorkflowThreadObservation,Record-WorkflowWaitSnapshot,Get-WorkflowReconciliation,Get-WorkflowState,Test-WorkflowStateIntegrity

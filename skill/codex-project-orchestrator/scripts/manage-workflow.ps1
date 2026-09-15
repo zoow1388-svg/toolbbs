@@ -1,8 +1,8 @@
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory=$true)][ValidateSet('initialize','configure-controller','register','transition','prepare-dispatch','record-sent','record-observation','record-wait','record-ack','record-callback','record-callback-ack','record-result','verify-result','reconcile','show','audit')][string]$Action,
+    [Parameter(Mandatory=$true)][ValidateSet('initialize','configure-controller','takeover-controller','register','transition','prepare-dispatch','record-sent','record-observation','record-wait','record-ack','record-callback','record-callback-ack','record-result','verify-result','reconcile','show','audit')][string]$Action,
     [Parameter(Mandatory=$true)][string]$ProjectPath,
-    [string]$WorkflowId,[string]$TaskId,[string]$ThreadId,[string]$HostId='local',[string]$ControllerThreadId,[string]$ControllerHostId='local',
+    [string]$WorkflowId,[string]$TaskId,[string]$ThreadId,[string]$HostId='local',[string]$ControllerThreadId,[string]$ControllerHostId='local',[string]$ExpectedControllerThreadId,[string]$ExpectedControllerHostId='local',[int64]$ExpectedControllerEpoch,[string]$TakeoverReason,
     [ValidateSet('analyst','developer','tester','reviewer')][string]$Role,
     [string]$Objective,[string]$Authorization='read-only',[string]$BaseRevision='unknown',
     [string]$DependsOn='',[string]$AllowedFiles='',[string]$RepairOf,
@@ -17,6 +17,7 @@ Import-Module (Join-Path $PSScriptRoot 'workflow-state.psm1') -Force -DisableNam
 switch ($Action) {
     'initialize' { if (-not $WorkflowId) { throw 'WorkflowId is required.' }; Initialize-WorkflowState -ProjectPath $ProjectPath -WorkflowId $WorkflowId -ControllerThreadId $ControllerThreadId -ControllerHostId $ControllerHostId }
     'configure-controller' { if(-not $ControllerThreadId){throw 'ControllerThreadId is required.'};Set-WorkflowController -ProjectPath $ProjectPath -ControllerThreadId $ControllerThreadId -ControllerHostId $ControllerHostId }
+    'takeover-controller' { if(-not $ControllerThreadId -or -not $ExpectedControllerThreadId -or -not $TakeoverReason){throw 'ControllerThreadId, ExpectedControllerThreadId, and TakeoverReason are required.'};Set-WorkflowControllerTakeover -ProjectPath $ProjectPath -ExpectedControllerThreadId $ExpectedControllerThreadId -ExpectedControllerHostId $ExpectedControllerHostId -ExpectedControllerEpoch $ExpectedControllerEpoch -ControllerThreadId $ControllerThreadId -ControllerHostId $ControllerHostId -Reason $TakeoverReason }
     'register' {
         if (-not $TaskId -or -not $ThreadId -or -not $Role -or -not $Objective) { throw 'TaskId, ThreadId, Role, and Objective are required.' }
         $dependencyList = @($DependsOn -split ',' | Where-Object { $_ } | ForEach-Object { $_.Trim() })

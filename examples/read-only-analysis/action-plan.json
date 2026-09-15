@@ -1,7 +1,10 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "workflow_id": "WF-READONLY-001",
   "project_path": "D:\\example-project",
+  "controller_thread_id": "controller-example",
+  "controller_host_id": "local",
+  "controller_epoch": 1,
   "based_on_event_sequence": 2,
   "workflow_state_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
   "tasks_state_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",

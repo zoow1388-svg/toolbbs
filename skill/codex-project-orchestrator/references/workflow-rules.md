@@ -28,6 +28,8 @@
 - v0.6 不允许用 `transition -Verified` 自报结果可信。必须先调用 `verify-result`，由状态管理器运行验证器并保存不可变回执。
 - 派发必须保存各依赖的可信 `end_revision`；依赖修订必须唯一并等于接收任务的 `base_revision`。
 - 角色门禁分别要求 `plan_ready`、`implementation_complete`、`tests_executed` 和 `code_review_complete`。测试至少有一项通过检查，审查不得遗留发现。
+- 总控身份使用单调递增任期；接管必须匹配旧身份和旧任期，并在项目锁内一次完成。接管后所有旧动作计划失效。
+- 已派发任务的总控任期和回传目标不可变；只有接管后的新派发使用新总控身份。
 
 ## 返修
 

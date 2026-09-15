@@ -3,7 +3,7 @@
     "task_id": "ANALYSIS-001", "thread_id": "example-thread", "host_id": "local", "role": "analyst", "repair_of": null,
     "status": "approved", "depends_on": [], "project_path": "D:\\example-project", "base_revision": "unborn",
     "allowed_files": [], "objective": "只读分析项目结构", "authorization": "read-only", "repair_count": 0,
-    "callback_event_id": null, "callback_status": "not-prepared",
+    "callback_event_id": null, "callback_target_thread_id": null, "callback_target_host_id": null, "dispatch_controller_epoch": null, "callback_status": "not-prepared",
     "updated_at": "2026-09-15T00:00:00+08:00"
   }
 ]

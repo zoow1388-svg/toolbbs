@@ -28,5 +28,9 @@
 24. v0.9 恢复先核对不可变总控任务身份和 `callback_event_id`。回传为 `prepared` 时等待执行任务主动唤醒；为 `received` 时只发送同一事件的 ACK；为 `acknowledged` 时不得重复发送 ACK。
 25. 原始回传或 ACK 工具回执缺失、哈希变化、来源任务、派发编号、目标总控或主机不一致时停止。重复收到相同事件只返回当前状态，不新增事件或重复派发。
 26. 可信结果已经验证但回传尚未确认时，动作只能是 `wait_callback`，不得完成任务或释放后续依赖。
+27. v1.1 接管前记录当前 `controller_thread_id`、`controller_host_id` 和 `controller_epoch`，并确认原总控不可恢复；普通暂停或等待不构成接管理由。
+28. 只使用 `takeover-controller` 比较并交换总控身份。出现 `STALE_CONTROLLER_LEASE` 说明状态已被其他总控改变，立即停止并重新读取，禁止用更大的任期猜测重试。
+29. 接管成功后废弃所有旧动作计划并重新生成。新旧总控不得共用同一执行任务身份。
+30. 已派发任务继续使用其 `callback_target_thread_id`、`callback_target_host_id` 和 `dispatch_controller_epoch`；不得改写派发信封或生成替代回传事件。旧回传目标不可访问时，使用保存的等待和完整读取证据恢复并进入人工检查。
 
 清理只限本次流程创建并可确认无用的临时文件；不得删除用途不明文件、用户修改、生产数据或动态入口。

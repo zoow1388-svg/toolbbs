@@ -128,3 +128,13 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File '.\skill\codex-project-o
 每个后续派发信封保存依赖任务的 `end_revision`。多个依赖必须指向同一修订，且该修订必须等于新任务的 `base_revision`，防止测试或审查检查错误版本。
 
 失败或阻塞任务可登记一次 `repair_of` 返修任务。返修必须保持相同角色、依赖和授权，文件范围只能缩小不能扩大；第二次返修会关闭门禁并要求重新分析。
+
+## v1.1 总控接管与断点恢复
+
+工作流使用 `controller_epoch` 标识唯一总控任期。原总控不可恢复时，新总控必须带上自己最后读取到的旧身份、旧任期和接管原因执行比较并交换：
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File '.\skill\codex-project-orchestrator\scripts\manage-workflow.ps1' -Action takeover-controller -ProjectPath 'D:\目标项目' -ExpectedControllerThreadId '旧总控任务ID' -ExpectedControllerHostId 'local' -ExpectedControllerEpoch 1 -ControllerThreadId '新总控任务ID' -ControllerHostId 'local' -TakeoverReason '旧总控任务不可恢复'
+```
+
+只有与当前状态完全匹配的第一个接管请求能成功。接管会递增任期、保留历史并使旧动作计划失效。已派发任务继续使用派发时固化的旧回传目标和事件，不修改信封、不重复派发；新派发使用新总控和新任期。

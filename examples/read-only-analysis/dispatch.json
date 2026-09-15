@@ -1,6 +1,7 @@
 {
   "dispatch_id": "ANALYSIS-001-exampledispatch",
   "workflow_id": "WF-EXAMPLE-001",
+  "controller_epoch": 1,
   "task_id": "ANALYSIS-001",
   "thread_id": "example-thread",
   "host_id": "local",

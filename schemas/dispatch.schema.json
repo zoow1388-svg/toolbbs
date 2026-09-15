@@ -3,10 +3,11 @@
   "$id": "dispatch.schema.json",
   "type": "object",
   "additionalProperties": false,
-  "required": ["dispatch_id", "workflow_id", "task_id", "thread_id", "host_id", "role", "project_path", "base_revision", "objective", "depends_on", "dependency_revisions", "allowed_files", "authorization", "callback", "created_at"],
+  "required": ["dispatch_id", "workflow_id", "controller_epoch", "task_id", "thread_id", "host_id", "role", "project_path", "base_revision", "objective", "depends_on", "dependency_revisions", "allowed_files", "authorization", "callback", "created_at"],
   "properties": {
     "dispatch_id": {"type": "string", "minLength": 1},
     "workflow_id": {"type": "string", "minLength": 1},
+    "controller_epoch": {"type": "integer", "minimum": 1},
     "task_id": {"type": "string", "pattern": "^[A-Z]+-[0-9]{3,}$"},
     "thread_id": {"type": "string", "minLength": 1},
     "host_id": {"type": "string", "minLength": 1},
