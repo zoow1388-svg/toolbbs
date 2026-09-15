@@ -11,6 +11,7 @@
 - 调用 `send_message_to_thread` 后原样保存工具返回值，再执行 `record-sent`。消息 ID 仅在真实返回时记录；不得猜测。
 - 用 `wait_threads` 等待最多八个任务，原样保存响应，再用 `import-wait-snapshot.ps1` 提取 revision、游标、turn ID、item ID 和截断标记；后续等待传入上次返回的游标。
 - `wait_threads` 中的 `latestAssistantMessage.text` 只可作为预览。即使状态完成，只要需要结果正文，都必须调用 `read_thread` 获取完整响应。
+- 只有 `latestTurn.status=completed` 且 `latestAssistantMessage.phase=final_answer` 时才能生成读取结果动作；活动 commentary 只能作为进度证据。
 - 保存 `read_thread` 原始响应，用 `extract-thread-result.ps1` 按快照中的准确 turn ID 和 item ID 提取 `final_answer`；找不到、重复、未完成或身份不符时停止。
 - 用 `read_thread` 补充任务身份和项目路径观察时，另行执行 `record-observation`。
 - 创建新任务必须取得用户明确授权；普通子任务优先复用已登记任务。
@@ -28,3 +29,5 @@
 执行每个动作前调用 `test-action-plan-current.ps1`。事件序号、工作流文件哈希或任务文件哈希任一变化时，丢弃旧计划并重新生成。`wait_tasks` 可合并最多八个目标，其他修改状态的动作逐项执行并保存证据。
 
 `normalize_result` 与紧随其后的 `verify_result` 属于同一结果处理序列：先写入建议路径，再用该准确路径验证。`verify_result` 改变状态后必须丢弃计划，重新生成完成动作。
+
+宿主未返回游标时，动作参数必须省略 `afterCursor`，不得传空字符串或补造游标。

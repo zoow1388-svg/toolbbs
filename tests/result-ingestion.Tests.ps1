@@ -54,6 +54,10 @@ Describe 'native task result ingestion' {
     }
 
     It 'records one increasing wait revision and routes recovery to full-result fetch' {
+        $activeRaw = Join-Path $project 'wait-active.json'
+        Copy-Item (Join-Path $fixtures 'wait-active-commentary.json') $activeRaw
+        $activeSnapshot = Join-Path $project 'wait-active.snapshot.json'
+        (Invoke-Script $importer @('-RawWaitPath',$activeRaw,'-ExpectedThreadId','thread-001','-ExpectedHostId','local','-OutputPath',$activeSnapshot)).ExitCode | Should Be 0
         $rawWait = Join-Path $project 'wait.json'
         Copy-Item (Join-Path $fixtures 'wait-completed-truncated.json') $rawWait
         $snapshot = Join-Path $project 'wait-snapshot.json'
@@ -66,10 +70,16 @@ Describe 'native task result ingestion' {
         $receipt = Join-Path $project 'receipt.json'; Set-Content $receipt '{"sent":true}'
         (Invoke-Script $manager @('-Action','record-sent','-ProjectPath',$project,'-TaskId','ANALYSIS-001','-DispatchId',$dispatchId,'-ReceiptPath',$receipt)).ExitCode | Should Be 0
         (Invoke-Script $manager @('-Action','record-ack','-ProjectPath',$project,'-TaskId','ANALYSIS-001','-DispatchId',$dispatchId)).ExitCode | Should Be 0
+        (Invoke-Script $manager @('-Action','record-wait','-ProjectPath',$project,'-TaskId','ANALYSIS-001','-SnapshotPath',$activeSnapshot)).ExitCode | Should Be 0
+        $activeTask=Get-RecordedTask $project;$activeTask.latest_turn_status|Should Be 'inProgress';$activeTask.latest_item_phase|Should Be 'commentary'
+        $activeReconcile=Invoke-Script $manager @('-Action','reconcile','-ProjectPath',$project,'-TaskId','ANALYSIS-001')
+        (($activeReconcile.Output[0..($activeReconcile.Output.Count - 2)] -join "`n")|ConvertFrom-Json).decision|Should Be 'wait_for_result'
         (Invoke-Script $manager @('-Action','record-wait','-ProjectPath',$project,'-TaskId','ANALYSIS-001','-SnapshotPath',$snapshot)).ExitCode | Should Be 0
         $task = Get-RecordedTask $project
         $task.wait_revision | Should Be 12
         $task.latest_item_id | Should Be 'item-001'
+        $task.latest_turn_status | Should Be 'completed'
+        $task.latest_item_phase | Should Be 'final_answer'
         $task.result_truncated | Should Be $true
         $reconcile = Invoke-Script $manager @('-Action','reconcile','-ProjectPath',$project,'-TaskId','ANALYSIS-001')
         (($reconcile.Output[0..($reconcile.Output.Count - 2)] -join "`n") | ConvertFrom-Json).decision | Should Be 'fetch_full_result'

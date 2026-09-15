@@ -2,6 +2,11 @@ Set-StrictMode -Version 2.0
 $ErrorActionPreference='Stop'
 
 function Get-FileSha256([string]$Path){(Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()}
+function New-WaitTarget($Task,[string]$Purpose){
+    $target=[ordered]@{task_id=$Task.task_id;threadId=$Task.thread_id;hostId=$Task.host_id;purpose=$Purpose}
+    if(-not [string]::IsNullOrWhiteSpace([string]$Task.read_cursor)){$target.afterCursor=$Task.read_cursor}
+    [pscustomobject]$target
+}
 
 function New-WorkflowActionPlan {
     param([Parameter(Mandatory=$true)][string]$ProjectPath)
@@ -54,14 +59,14 @@ function New-WorkflowActionPlan {
             continue
         }
         if($task.status -eq 'dispatched' -and $task.delivery_status -eq 'sent'){
-            $waitTargets.Add([pscustomobject][ordered]@{task_id=$task.task_id;threadId=$task.thread_id;hostId=$task.host_id;afterCursor=$task.read_cursor;purpose='acknowledgement'})
+            $waitTargets.Add((New-WaitTarget $task 'acknowledgement'))
             continue
         }
         if($task.status -eq 'running' -and $task.delivery_status -eq 'acknowledged'){
-            if(-not [string]::IsNullOrWhiteSpace([string]$task.latest_turn_id) -and -not [string]::IsNullOrWhiteSpace([string]$task.latest_item_id)){
+            if($task.latest_turn_status -eq 'completed' -and $task.latest_item_phase -eq 'final_answer' -and -not [string]::IsNullOrWhiteSpace([string]$task.latest_turn_id) -and -not [string]::IsNullOrWhiteSpace([string]$task.latest_item_id)){
                 Add-Action 'read_result' @($task.task_id) 'read_thread' ([ordered]@{threadId=$task.thread_id;hostId=$task.host_id;turnId=$task.latest_turn_id;itemId=$task.latest_item_id}) @('raw read_thread response','exact final result','SHA-256') $false $null 'Wait snapshot identifies a completed result item.'
             }else{
-                $waitTargets.Add([pscustomobject][ordered]@{task_id=$task.task_id;threadId=$task.thread_id;hostId=$task.host_id;afterCursor=$task.read_cursor;purpose='result'})
+                $waitTargets.Add((New-WaitTarget $task 'result'))
             }
             continue
         }

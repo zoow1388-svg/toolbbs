@@ -75,3 +75,9 @@ v0.5 及更早版本的历史完成任务若没有回执，升级时保留完成
 `plan-next-actions.ps1` 在完整性审计通过后读取整个工作流，为授权、派发、发送、等待、读取、规范化、验证完成和人工检查生成有序动作。多个等待目标按宿主限制自动分成每批最多八个；计划器只描述操作，不调用 Codex 宿主工具。
 
 动作计划绑定 `event_sequence`、`workflow.json` 哈希和 `tasks.json` 哈希。`test-action-plan-current.ps1` 在执行前验证这三个快照依据，任一变化都使计划过期。现有单任务 `reconcile` 保留为兼容入口，工作流级调度以动作计划为准。
+
+## v0.8 真实双窗口验证
+
+真实 Codex 双窗口流程已跑通任务创建、派发、增量等待、完整读取、规范化、可信验证、审计和完成。宿主发送回执可能只有任务 ID，因此消息 ID 和游标继续保持可选，不允许补造；缺失游标时等待参数直接省略。
+
+等待状态新增 `latest_turn_status` 和 `latest_item_phase`。只有 `completed + final_answer` 才能触发完整结果读取；`inProgress + commentary` 始终继续等待。完整验证记录见 `docs/v0.8-real-e2e.md`。

@@ -104,3 +104,9 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File '.\skill\codex-project-o
 ```
 
 计划器不会发送消息或修改任务状态。状态事件序号或状态文件发生变化后，旧计划检查失败，必须生成新文件；不要手工修改旧计划。
+
+## v0.8 真实双窗口验证
+
+已在同一 D 盘项目中使用两个真实 Codex 任务跑通完整只读流程。v0.8 根据现场结果修复两项问题：宿主没有游标时不再传空 `afterCursor`；活动 commentary 不再被误判为最终结果。
+
+结果读取现在必须同时满足 `latest_turn_status=completed` 和 `latest_item_phase=final_answer`。真实验证范围和未覆盖场景见 [`docs/v0.8-real-e2e.md`](docs/v0.8-real-e2e.md)。

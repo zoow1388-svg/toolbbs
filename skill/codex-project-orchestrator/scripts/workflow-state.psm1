@@ -70,7 +70,7 @@ function Add-Defaults {
         foreach ($name in @('send_receipt_path','send_receipt_sha256','observation_path','observation_sha256','observed_status','observed_at')) {
             if ($task.PSObject.Properties.Match($name).Count -eq 0) { Add-Member -InputObject $task -NotePropertyName $name -NotePropertyValue $null }
         }
-        foreach ($name in @('wait_snapshot_path','wait_snapshot_sha256','latest_turn_id','latest_item_id','raw_result_sha256','normalized_result_sha256','verification_receipt_path','verification_receipt_sha256','verified_at')) {
+        foreach ($name in @('wait_snapshot_path','wait_snapshot_sha256','latest_turn_id','latest_turn_status','latest_item_id','latest_item_phase','raw_result_sha256','normalized_result_sha256','verification_receipt_path','verification_receipt_sha256','verified_at')) {
             if ($task.PSObject.Properties.Match($name).Count -eq 0) { Add-Member -InputObject $task -NotePropertyName $name -NotePropertyValue $null }
         }
         if($task.PSObject.Properties.Match('wait_revision').Count -eq 0){Add-Member -InputObject $task -NotePropertyName wait_revision -NotePropertyValue $null}
@@ -80,7 +80,7 @@ function Add-Defaults {
             Add-Member -InputObject $task -NotePropertyName verification_status -NotePropertyValue $verificationStatus
         }
     }
-    if ([int]$Workflow.state_version -lt 6) { $Workflow.state_version = 6 }
+    if ([int]$Workflow.state_version -lt 7) { $Workflow.state_version = 7 }
 }
 
 function Write-Event {
@@ -99,7 +99,7 @@ function Initialize-WorkflowState {
         $workflowPath = Join-Path $state 'workflow.json'
         if (Test-Path -LiteralPath $workflowPath) { throw 'Workflow already exists.' }
         $now = Get-UtcTimestamp
-        $workflow = [ordered]@{ workflow_id=$WorkflowId; project_path=$resolved; state_version=6; status='draft'; current_stage='analysis'; authorization='read-only'; event_sequence=0; created_at=$now; updated_at=$now }
+        $workflow = [ordered]@{ workflow_id=$WorkflowId; project_path=$resolved; state_version=7; status='draft'; current_stage='analysis'; authorization='read-only'; event_sequence=0; created_at=$now; updated_at=$now }
         $tasks = @()
         Write-Event $state $workflow 'workflow_initialized' $null $null 'draft' 'initialization'
         Write-JsonAtomic $workflow $workflowPath
@@ -125,7 +125,7 @@ function Register-WorkflowTask {
         $activeFiles = @($tasks | Where-Object { $_.role -eq 'developer' -and $_.status -notin $script:TerminalStates } | ForEach-Object { $_.allowed_files })
         $overlap = @($AllowedFiles | Where-Object { $_ -in $activeFiles })
         if ($Role -eq 'developer' -and $overlap.Count -gt 0) { throw "File ownership conflict: $($overlap -join ', ')" }
-        $task = [ordered]@{ task_id=$TaskId; thread_id=$ThreadId; host_id=$HostId; role=$Role; status='draft'; depends_on=@($DependsOn); project_path=$workflow.project_path; base_revision=$BaseRevision; allowed_files=@($AllowedFiles); objective=$Objective; authorization=$Authorization; repair_count=0; dispatch_count=0; dispatch_id=$null; delivery_status='not-prepared'; dispatch_path=$null; sent_message_id=$null; send_receipt_path=$null; send_receipt_sha256=$null; result_message_id=$null; read_cursor=$null; wait_revision=$null; wait_snapshot_path=$null; wait_snapshot_sha256=$null; latest_turn_id=$null; latest_item_id=$null; result_truncated=$false; observation_path=$null; observation_sha256=$null; observed_status=$null; observed_at=$null; dispatched_at=$null; acknowledged_at=$null; result_received_at=$null; raw_result_path=$null; raw_result_sha256=$null; normalized_result_path=$null; normalized_result_sha256=$null; verification_receipt_path=$null; verification_receipt_sha256=$null; verification_status='unverified'; verified_at=$null; verified=$false; updated_at=(Get-UtcTimestamp) }
+        $task = [ordered]@{ task_id=$TaskId; thread_id=$ThreadId; host_id=$HostId; role=$Role; status='draft'; depends_on=@($DependsOn); project_path=$workflow.project_path; base_revision=$BaseRevision; allowed_files=@($AllowedFiles); objective=$Objective; authorization=$Authorization; repair_count=0; dispatch_count=0; dispatch_id=$null; delivery_status='not-prepared'; dispatch_path=$null; sent_message_id=$null; send_receipt_path=$null; send_receipt_sha256=$null; result_message_id=$null; read_cursor=$null; wait_revision=$null; wait_snapshot_path=$null; wait_snapshot_sha256=$null; latest_turn_id=$null; latest_turn_status=$null; latest_item_id=$null; latest_item_phase=$null; result_truncated=$false; observation_path=$null; observation_sha256=$null; observed_status=$null; observed_at=$null; dispatched_at=$null; acknowledged_at=$null; result_received_at=$null; raw_result_path=$null; raw_result_sha256=$null; normalized_result_path=$null; normalized_result_sha256=$null; verification_receipt_path=$null; verification_receipt_sha256=$null; verification_status='unverified'; verified_at=$null; verified=$false; updated_at=(Get-UtcTimestamp) }
         $tasks += [pscustomobject]$task
         Write-Event $state $workflow 'task_registered' $TaskId $null 'draft' 'registration'
         $workflow.updated_at = Get-UtcTimestamp; Write-JsonAtomic $workflow $workflowPath; Write-JsonAtomic $tasks $tasksPath
@@ -211,7 +211,7 @@ function Record-WorkflowWaitSnapshot {
         $rawResponseHash=(Get-FileHash -LiteralPath $snapshot.raw_response_path -Algorithm SHA256).Hash.ToLowerInvariant()
         if($rawResponseHash -ne $snapshot.raw_response_sha256){throw 'Wait snapshot raw response hash mismatch.'}
         $resolved=[IO.Path]::GetFullPath($SnapshotPath);$task.wait_snapshot_path=$resolved;$task.wait_snapshot_sha256=(Get-FileHash -LiteralPath $resolved -Algorithm SHA256).Hash.ToLowerInvariant()
-        $task.wait_revision=[int64]$snapshot.revision;$task.read_cursor=$snapshot.cursor;$task.latest_turn_id=$snapshot.latest_turn_id;$task.latest_item_id=$snapshot.latest_item_id;$task.result_truncated=[bool]$snapshot.result_truncated;$task.observed_status=$snapshot.status;$task.observed_at=Get-UtcTimestamp;$task.updated_at=Get-UtcTimestamp
+        $task.wait_revision=[int64]$snapshot.revision;$task.read_cursor=$snapshot.cursor;$task.latest_turn_id=$snapshot.latest_turn_id;$task.latest_turn_status=$snapshot.latest_turn_status;$task.latest_item_id=$snapshot.latest_item_id;$task.latest_item_phase=$snapshot.latest_item_phase;$task.result_truncated=[bool]$snapshot.result_truncated;$task.observed_status=$snapshot.status;$task.observed_at=Get-UtcTimestamp;$task.updated_at=Get-UtcTimestamp
         Write-Event $state $workflow 'wait_snapshot_recorded' $TaskId $null $snapshot.status $snapshot.cursor
         $workflow.updated_at=Get-UtcTimestamp;Write-JsonAtomic $workflow $workflowPath;Write-JsonAtomic $tasks $tasksPath
     }
@@ -298,7 +298,7 @@ function Get-WorkflowReconciliation {
     $decision = switch ("$($task.status)|$($task.delivery_status)") {
         'approved|prepared' {'send_prepared_dispatch'}
         'dispatched|sent' {'wait_for_acknowledgement'}
-        'running|acknowledged' {if(-not [string]::IsNullOrWhiteSpace($task.latest_turn_id) -and -not [string]::IsNullOrWhiteSpace($task.latest_item_id)){'fetch_full_result'}else{'wait_for_result'}}
+        'running|acknowledged' {if($task.latest_turn_status -eq 'completed' -and $task.latest_item_phase -eq 'final_answer' -and -not [string]::IsNullOrWhiteSpace($task.latest_turn_id) -and -not [string]::IsNullOrWhiteSpace($task.latest_item_id)){'fetch_full_result'}else{'wait_for_result'}}
         'verifying|result_received' {if($task.verified){'complete_verified_task'}else{'validate_received_result'}}
         'completed|result_received' {'complete'}
         default {'manual_review'}
