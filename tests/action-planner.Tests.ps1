@@ -60,7 +60,7 @@ Describe 'workflow action planner' {
     It 'invalidates an old action plan after controller takeover' {
         Invoke-Manager @('-Action','register','-ProjectPath',$project,'-TaskId','ANALYSIS-001','-ThreadId','thread-1','-Role','analyst','-Objective','analyze')|Should Be 0
         $path=Join-Path $project 'old-controller-plan.json';$plan=New-Plan $project $path
-        $plan.schema_version|Should Be 4;$plan.controller_epoch|Should Be 1;$plan.controller_thread_id|Should Be 'controller-1'
+        $plan.schema_version|Should Be 5;$plan.controller_epoch|Should Be 1;$plan.controller_thread_id|Should Be 'controller-1'
         Invoke-Manager @('-Action','takeover-controller','-ProjectPath',$project,'-ExpectedControllerThreadId','controller-1','-ExpectedControllerEpoch','1','-ControllerThreadId','controller-2','-TakeoverReason','controller replacement')|Should Be 0
         (Invoke-Tool $currentCheck @('-ProjectPath',$project,'-PlanPath',$path)).ExitCode|Should Be 1
         $newPlan=New-Plan $project (Join-Path $project 'new-controller-plan.json');$newPlan.controller_epoch|Should Be 2;$newPlan.controller_thread_id|Should Be 'controller-2'

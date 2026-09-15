@@ -31,6 +31,8 @@ Before choosing an operational step, run `plan-next-actions.ps1` for the whole w
 
 Before executing a selected plan action, claim its exact action ID with `claim-action`. Execute only the immutable action stored by that checkpoint, renew a live lease only while work is progressing, and finish with `complete-action` or `fail-action` plus a raw evidence file. Never execute a second copy of a `claimed` or `failed` logical action. Lease expiry is not evidence that the action did not run.
 
+Resolve an expired or superseded claim only with `resolve-action` and independent evidence. Use `abandoned` only when no effect occurred, or `reconciled` when the effect is independently proven. A failed action may be retried only after `authorize-action-retry` records explicit approval and separate remediation evidence. Never use generic action recovery to bypass an unresolved external-send transaction.
+
 When the configured controller is unrecoverable, read [recovery.md](references/recovery.md) and use `takeover-controller` with the exact controller identity and epoch last read from trusted state. Never hand-edit controller fields. Treat a stale lease error as proof that another controller changed the workflow and stop. Regenerate every action plan after takeover. Do not rewrite existing dispatches or callback targets.
 
 Treat every unresolved `prepared` external action as possibly delivered. Inspect the target and host evidence; never call the tool again automatically. Use `cancel-external-action` only with evidence that delivery did not occur. When a replacement controller confirms an old action was delivered, require both the recovered raw receipt and separate observation evidence before completing it.

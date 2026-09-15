@@ -10,7 +10,7 @@ if(-not(Test-WorkflowStateIntegrity -ProjectPath $resolvedProject)){throw 'Workf
 $plan=Get-Content -LiteralPath $PlanPath -Raw -Encoding UTF8|ConvertFrom-Json
 $workflowPath=Join-Path $state 'workflow.json';$tasksPath=Join-Path $state 'tasks.json'
 $workflow=Get-Content -LiteralPath $workflowPath -Raw -Encoding UTF8|ConvertFrom-Json
-if($plan.schema_version -ne 4 -or $plan.PSObject.Properties.Match('external_actions_sha256').Count -eq 0 -or $plan.PSObject.Properties.Match('action_executions_sha256').Count -eq 0){throw 'STALE_ACTION_PLAN: regenerate with the action execution journal.'}
+if($plan.schema_version -ne 5 -or $plan.PSObject.Properties.Match('external_actions_sha256').Count -eq 0 -or $plan.PSObject.Properties.Match('action_executions_sha256').Count -eq 0){throw 'STALE_ACTION_PLAN: regenerate with evidence recovery support.'}
 if([IO.Path]::GetFullPath([string]$plan.project_path) -ne $resolvedProject){throw 'Action plan project does not match.'}
 if($plan.workflow_id -ne $workflow.workflow_id){throw 'Action plan workflow does not match.'}
 if([int64]$plan.controller_epoch -ne [int64]$workflow.controller_epoch -or $plan.controller_thread_id -ne $workflow.controller_thread_id -or $plan.controller_host_id -ne $workflow.controller_host_id){throw 'STALE_ACTION_PLAN: controller lease changed.'}

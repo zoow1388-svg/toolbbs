@@ -160,3 +160,9 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File '.\skill\codex-project-o
 ```
 
 认领结果写入 `action-executions.json`，包含不可变动作哈希和最长一小时的租约。长动作可以在租约到期前使用 `renew-action` 续期；完成或失败分别使用 `complete-action`、`fail-action` 并提供真实证据文件。重复唤醒、租约过期或控制器接管时，未解决动作只进入 `inspect_action_execution`，不会自动执行第二次。
+
+## v1.4 证据化恢复与安全重试
+
+过期或旧总控任期的动作先核查实际效果，再用 `resolve-action` 记录 `abandoned` 或 `reconciled`。活动租约不能解除，没有证据不能恢复。失败动作必须通过 `authorize-action-retry` 单独保存用户授权和原因消除证据，之后计划器才允许生成递增尝试号的新认领。
+
+外部发送仍以 `external-actions.json` 为最终依据：外部事务尚未取消时，不能通过通用动作恢复声称“没有发送”。动作计划升级为 Schema v5，旧计划会被拒绝。

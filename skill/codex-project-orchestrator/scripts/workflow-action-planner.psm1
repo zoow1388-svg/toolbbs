@@ -33,10 +33,11 @@ function New-WorkflowActionPlan {
     function Add-Action([string]$Type,[object[]]$TaskIds,[string]$Operation,$Parameters,[string[]]$Evidence,[bool]$StateChanging,$Authorization,[string]$Reason){
         $key=$(if($TaskIds.Count -eq 0){'workflow'}else{($TaskIds -join '+')})
         $operationHash=Get-ValueSha256 ([ordered]@{type=$Type;task_ids=@($TaskIds);operation=$Operation;parameters=$Parameters})
-        $unresolved=@($actionExecutions|Where-Object{$_.operation_sha256 -eq $operationHash -and $_.status -in @('claimed','failed')}|Sort-Object claimed_at)
+        $unresolved=@($actionExecutions|Where-Object{$_.operation_sha256 -eq $operationHash -and $_.status -in @('claimed','failed')}|Sort-Object attempt)
         if($unresolved.Count){
-            $checkpoint=$unresolved[-1];$checkpointType=$(if($checkpoint.status -eq 'claimed'){'inspect_action_execution'}else{'manual_review'})
-            $actions.Add([pscustomobject][ordered]@{action_id="$($checkpoint.action_id):checkpoint";type=$checkpointType;task_ids=@($TaskIds);based_on_event_sequence=$sequence;operation='inspect_action_execution';parameters=[ordered]@{execution_id=$checkpoint.execution_id;status=$checkpoint.status;lease_expires_at=$checkpoint.lease_expires_at};operation_sha256=$operationHash;evidence_required=@('action execution checkpoint','operation evidence');state_changing=$false;authorization_required='explicit-user-direction';reason='An earlier execution of this logical action is unresolved; do not execute it again.'})
+            $checkpoint=$unresolved[-1];$expired=([DateTime]::Parse($checkpoint.lease_expires_at).ToUniversalTime() -lt [DateTime]::UtcNow);$staleLease=([int64]$checkpoint.controller_epoch -ne [int64]$workflow.controller_epoch)
+            $checkpointType=$(if($checkpoint.status -eq 'failed'){'request_retry_authorization'}elseif($expired -or $staleLease){'resolve_action_execution'}else{'inspect_action_execution'})
+            $actions.Add([pscustomobject][ordered]@{action_id="$($checkpoint.action_id):checkpoint";type=$checkpointType;task_ids=@($TaskIds);based_on_event_sequence=$sequence;operation=$checkpointType;parameters=[ordered]@{execution_id=$checkpoint.execution_id;status=$checkpoint.status;lease_expires_at=$checkpoint.lease_expires_at;controller_epoch=[int64]$checkpoint.controller_epoch};operation_sha256=$operationHash;evidence_required=@('action execution checkpoint','independent operation evidence');state_changing=$false;authorization_required='explicit-user-direction';reason='An earlier execution of this logical action requires evidence-based resolution before another attempt.'})
             return
         }
         $actions.Add([pscustomobject][ordered]@{
@@ -138,7 +139,7 @@ function New-WorkflowActionPlan {
         Add-Action 'workflow_complete' @() 'report_completion' ([ordered]@{workflow_id=$workflow.workflow_id}) @('successful workflow audit','final delivery report') $false $null 'Every task is trusted complete.'
     }
     [pscustomobject][ordered]@{
-        schema_version=4;workflow_id=$workflow.workflow_id;project_path=$resolvedProject;controller_thread_id=$workflow.controller_thread_id;controller_host_id=$workflow.controller_host_id;controller_epoch=[int64]$workflow.controller_epoch;based_on_event_sequence=$sequence
+        schema_version=5;workflow_id=$workflow.workflow_id;project_path=$resolvedProject;controller_thread_id=$workflow.controller_thread_id;controller_host_id=$workflow.controller_host_id;controller_epoch=[int64]$workflow.controller_epoch;based_on_event_sequence=$sequence
         workflow_state_sha256=(Get-FileSha256 $workflowPath);tasks_state_sha256=(Get-FileSha256 $tasksPath);external_actions_sha256=$(if(Test-Path -LiteralPath $externalActionsPath){Get-FileSha256 $externalActionsPath}else{$null});action_executions_sha256=$(if(Test-Path -LiteralPath $actionExecutionsPath){Get-FileSha256 $actionExecutionsPath}else{$null})
         generated_at=(Get-Date).ToUniversalTime().ToString('o');actions=@($actions)
     }

@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory=$true)][ValidateSet('initialize','configure-controller','takeover-controller','register','transition','prepare-dispatch','claim-action','renew-action','complete-action','fail-action','begin-external-action','complete-external-action','cancel-external-action','record-sent','record-observation','record-wait','record-ack','record-callback','record-callback-ack','record-result','verify-result','reconcile','show','audit')][string]$Action,
+    [Parameter(Mandatory=$true)][ValidateSet('initialize','configure-controller','takeover-controller','register','transition','prepare-dispatch','claim-action','renew-action','complete-action','fail-action','resolve-action','authorize-action-retry','begin-external-action','complete-external-action','cancel-external-action','record-sent','record-observation','record-wait','record-ack','record-callback','record-callback-ack','record-result','verify-result','reconcile','show','audit')][string]$Action,
     [Parameter(Mandatory=$true)][string]$ProjectPath,
     [string]$WorkflowId,[string]$TaskId,[string]$ThreadId,[string]$HostId='local',[string]$ControllerThreadId,[string]$ControllerHostId='local',[string]$ExpectedControllerThreadId,[string]$ExpectedControllerHostId='local',[int64]$ExpectedControllerEpoch,[string]$TakeoverReason,
     [ValidateSet('analyst','developer','tester','reviewer')][string]$Role,
@@ -10,7 +10,7 @@ param(
     [string]$DispatchId,[string]$CallbackEventId,[string]$MessageId,[string]$ResultMessageId,[string]$Cursor,[string]$ReceiptPath,
     [string]$ObservedProjectPath,[string]$ObservedStatus,[string]$ObservationPath,[string]$SnapshotPath,
     [ValidateSet('dispatch_send','callback_ack')][string]$ExternalActionType,[string]$ExternalActionId,[string]$EvidencePath,
-    [string]$PlanPath,[string]$ActionId,[string]$ExecutionId,[int]$LeaseSeconds=300,[string]$ErrorMessage
+    [string]$PlanPath,[string]$ActionId,[string]$ExecutionId,[int]$LeaseSeconds=300,[string]$ErrorMessage,[ValidateSet('abandoned','reconciled')][string]$Resolution
 )
 
 $ErrorActionPreference = 'Stop'
@@ -32,6 +32,8 @@ switch ($Action) {
     'renew-action' { if(-not $ExecutionId){throw 'ExecutionId is required.'};Renew-WorkflowActionLease -ProjectPath $ProjectPath -ExecutionId $ExecutionId -LeaseSeconds $LeaseSeconds|ConvertTo-Json -Depth 20 }
     'complete-action' { if(-not $ExecutionId -or -not $EvidencePath){throw 'ExecutionId and EvidencePath are required.'};Set-WorkflowActionExecutionResult -ProjectPath $ProjectPath -ExecutionId $ExecutionId -Status completed -EvidencePath $EvidencePath|ConvertTo-Json -Depth 20 }
     'fail-action' { if(-not $ExecutionId -or -not $EvidencePath -or -not $ErrorMessage){throw 'ExecutionId, EvidencePath, and ErrorMessage are required.'};Set-WorkflowActionExecutionResult -ProjectPath $ProjectPath -ExecutionId $ExecutionId -Status failed -EvidencePath $EvidencePath -ErrorMessage $ErrorMessage|ConvertTo-Json -Depth 20 }
+    'resolve-action' { if(-not $ExecutionId -or -not $EvidencePath -or -not $Reason -or -not $Resolution){throw 'ExecutionId, EvidencePath, Reason, and Resolution are required.'};Resolve-WorkflowActionExecution -ProjectPath $ProjectPath -ExecutionId $ExecutionId -Resolution $Resolution -EvidencePath $EvidencePath -Reason $Reason|ConvertTo-Json -Depth 20 }
+    'authorize-action-retry' { if(-not $ExecutionId -or -not $EvidencePath -or -not $Reason){throw 'ExecutionId, EvidencePath, and Reason are required.'};Authorize-WorkflowActionRetry -ProjectPath $ProjectPath -ExecutionId $ExecutionId -EvidencePath $EvidencePath -Reason $Reason|ConvertTo-Json -Depth 20 }
     'begin-external-action' { if(-not $TaskId -or -not $ExternalActionType){throw 'TaskId and ExternalActionType are required.'};Start-WorkflowExternalAction -ProjectPath $ProjectPath -TaskId $TaskId -ActionType $ExternalActionType -ExpectedControllerEpoch $ExpectedControllerEpoch|ConvertTo-Json -Depth 20 }
     'complete-external-action' { if(-not $ExternalActionId -or -not $ReceiptPath){throw 'ExternalActionId and ReceiptPath are required.'};Complete-WorkflowExternalAction -ProjectPath $ProjectPath -ActionId $ExternalActionId -ReceiptPath $ReceiptPath -MessageId $MessageId -Cursor $Cursor -EvidencePath $EvidencePath|ConvertTo-Json -Depth 20 }
     'cancel-external-action' { if(-not $ExternalActionId -or -not $EvidencePath){throw 'ExternalActionId and EvidencePath are required.'};Cancel-WorkflowExternalAction -ProjectPath $ProjectPath -ActionId $ExternalActionId -EvidencePath $EvidencePath|ConvertTo-Json -Depth 20 }
