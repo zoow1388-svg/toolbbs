@@ -3,9 +3,9 @@
   "$id": "result.schema.json",
   "type": "object",
   "additionalProperties": false,
-  "required": ["task_id", "thread_id", "host_id", "project_path", "base_revision", "end_revision", "summary", "preexisting_changes", "changed_files", "commands", "checks", "artifacts", "unexecuted", "blockers", "risks", "required_authorization", "created_at", "normalization"],
+  "required": ["task_id", "dispatch_id", "thread_id", "host_id", "project_path", "base_revision", "end_revision", "summary", "preexisting_changes", "changed_files", "commands", "checks", "artifacts", "unexecuted", "blockers", "risks", "required_authorization", "created_at", "normalization"],
   "properties": {
-    "task_id": {"type": "string"}, "thread_id": {"type": "string", "minLength": 1}, "host_id": {"type": "string", "minLength": 1}, "project_path": {"type": "string"},
+    "task_id": {"type": "string"}, "dispatch_id": {"type": "string", "minLength": 1}, "thread_id": {"type": "string", "minLength": 1}, "host_id": {"type": "string", "minLength": 1}, "project_path": {"type": "string"},
     "base_revision": {"type": "string", "minLength": 1}, "end_revision": {"type": "string", "minLength": 1}, "summary": {"type": "string", "minLength": 1},
     "preexisting_changes": {"type": "array", "items": {"type": "string"}},
     "changed_files": {"type": "array", "items": {"type": "string"}},

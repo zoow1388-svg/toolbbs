@@ -42,6 +42,12 @@ foreach ($task in $tasks) {
     if ($task.project_path -ne $workflow.project_path) { Add-ValidationError "$context project_path differs from workflow" }
     if ([int]$task.repair_count -lt 0 -or [int]$task.repair_count -gt 1) { Add-ValidationError "$context repair_count must be 0 or 1" }
     if ($task.role -eq 'developer' -and $task.authorization -notin @('implementation-approved','git-approved','deployment-approved')) { Add-ValidationError "$context developer lacks implementation approval" }
+    if ($task.PSObject.Properties.Match('delivery_status').Count -gt 0) {
+        if ($task.delivery_status -notin @('not-prepared','prepared','sent','acknowledged','result_received')) { Add-ValidationError "$context invalid delivery_status: $($task.delivery_status)" }
+        if ($task.delivery_status -ne 'not-prepared' -and [string]::IsNullOrWhiteSpace($task.dispatch_id)) { Add-ValidationError "$context delivery requires dispatch_id" }
+        if ($task.delivery_status -in @('sent','acknowledged','result_received') -and [string]::IsNullOrWhiteSpace($task.sent_message_id)) { Add-ValidationError "$context delivery requires sent_message_id" }
+        if ($task.delivery_status -eq 'result_received' -and [string]::IsNullOrWhiteSpace($task.result_message_id)) { Add-ValidationError "$context result_received requires result_message_id" }
+    }
 }
 
 foreach ($task in $tasks) {

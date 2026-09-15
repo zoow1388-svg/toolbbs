@@ -3,7 +3,7 @@ $renderer = Join-Path $PSScriptRoot '..\skill\codex-project-orchestrator\scripts
 
 function New-ResultFile([string]$Path,[string]$Project,[string]$Base,[string]$End) {
     $value = [ordered]@{
-        task_id='TEST-001'; thread_id='thread-1'; host_id='local'; project_path=$Project
+        task_id='TEST-001'; dispatch_id='TEST-001-dispatch'; thread_id='thread-1'; host_id='local'; project_path=$Project
         base_revision=$Base; end_revision=$End; summary='Readable validation result'
         preexisting_changes=@(); changed_files=@('README.md'); commands=@()
         checks=@([ordered]@{name='automated tests';status='passed'}); artifacts=@(); unexecuted=@()
@@ -56,6 +56,11 @@ Describe 'result validation and rendering' {
         $output = Join-Path $project 'result.md'
         Invoke-Script $renderer @('-ResultPath',$resultPath,'-OutputPath',$output,'-ProjectPath',$project) | Should Be 1
         Test-Path $output | Should Be $false
+    }
+
+    It 'rejects a normalized result from another dispatch round' {
+        New-ResultFile $resultPath $project $head $head
+        Invoke-Script $validator @('-ResultPath',$resultPath,'-ProjectPath',$project,'-ExpectedTaskId','TEST-001','-ExpectedDispatchId','another-dispatch','-ExpectedThreadId','thread-1') | Should Be 1
     }
 
     It 'accepts exact unborn markers for a repository without HEAD' {

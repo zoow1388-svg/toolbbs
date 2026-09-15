@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "dispatch.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["dispatch_id", "workflow_id", "task_id", "thread_id", "host_id", "role", "project_path", "base_revision", "objective", "depends_on", "allowed_files", "authorization", "created_at"],
+  "properties": {
+    "dispatch_id": {"type": "string", "minLength": 1},
+    "workflow_id": {"type": "string", "minLength": 1},
+    "task_id": {"type": "string", "pattern": "^[A-Z]+-[0-9]{3,}$"},
+    "thread_id": {"type": "string", "minLength": 1},
+    "host_id": {"type": "string", "minLength": 1},
+    "role": {"enum": ["analyst", "developer", "tester", "reviewer"]},
+    "project_path": {"type": "string", "pattern": "^[A-Za-z]:\\\\"},
+    "base_revision": {"type": "string", "minLength": 1},
+    "objective": {"type": "string", "minLength": 1},
+    "depends_on": {"type": "array", "uniqueItems": true, "items": {"type": "string"}},
+    "allowed_files": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+    "authorization": {"enum": ["read-only", "plan-approved", "implementation-approved", "test-approved", "git-approved", "deployment-approved"]},
+    "created_at": {"type": "string", "format": "date-time"}
+  }
+}

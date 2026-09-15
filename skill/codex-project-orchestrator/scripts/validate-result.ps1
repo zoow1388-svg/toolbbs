@@ -1,7 +1,10 @@
 ﻿[CmdletBinding()]
 param(
     [Parameter(Mandatory=$true)][string]$ResultPath,
-    [string]$ProjectPath
+    [string]$ProjectPath,
+    [string]$ExpectedTaskId,
+    [string]$ExpectedDispatchId,
+    [string]$ExpectedThreadId
 )
 
 $ErrorActionPreference = 'Stop'
@@ -13,8 +16,11 @@ function Has-Property($Object,[string]$Name) { return $null -ne $Object -and $Ob
 try { $result = Get-Content -LiteralPath $ResultPath -Raw -Encoding UTF8 | ConvertFrom-Json }
 catch { Write-Output "INVALID: `$ - JSON 解析失败: $($_.Exception.Message)"; exit 1 }
 
-$required = @('task_id','thread_id','host_id','project_path','base_revision','end_revision','summary','preexisting_changes','changed_files','commands','checks','artifacts','unexecuted','blockers','risks','required_authorization','created_at','normalization')
+$required = @('task_id','dispatch_id','thread_id','host_id','project_path','base_revision','end_revision','summary','preexisting_changes','changed_files','commands','checks','artifacts','unexecuted','blockers','risks','required_authorization','created_at','normalization')
 foreach ($name in $required) { if (-not (Has-Property $result $name)) { Add-ResultError "`$.$name" '缺少必填字段' } }
+if ($ExpectedTaskId -and $result.task_id -ne $ExpectedTaskId) { Add-ResultError '$.task_id' '与预期任务不一致' }
+if ($ExpectedDispatchId -and $result.dispatch_id -ne $ExpectedDispatchId) { Add-ResultError '$.dispatch_id' '与预期派发不一致，结果可能来自旧轮次' }
+if ($ExpectedThreadId -and $result.thread_id -ne $ExpectedThreadId) { Add-ResultError '$.thread_id' '与预期任务窗口不一致' }
 
 foreach ($name in @('preexisting_changes','changed_files','artifacts','unexecuted','blockers','risks')) {
     if (Has-Property $result $name) {

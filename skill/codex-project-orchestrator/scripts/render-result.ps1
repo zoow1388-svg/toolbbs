@@ -2,12 +2,15 @@
 param(
     [Parameter(Mandatory=$true)][string]$ResultPath,
     [Parameter(Mandatory=$true)][string]$OutputPath,
-    [string]$ProjectPath
+    [string]$ProjectPath,
+    [string]$ExpectedTaskId,
+    [string]$ExpectedDispatchId,
+    [string]$ExpectedThreadId
 )
 
 $ErrorActionPreference = 'Stop'
 $validator = Join-Path $PSScriptRoot 'validate-result.ps1'
-$validation = & $validator -ResultPath $ResultPath -ProjectPath $ProjectPath
+$validation = & $validator -ResultPath $ResultPath -ProjectPath $ProjectPath -ExpectedTaskId $ExpectedTaskId -ExpectedDispatchId $ExpectedDispatchId -ExpectedThreadId $ExpectedThreadId
 if ($LASTEXITCODE -ne 0) { $validation | ForEach-Object { Write-Error $_ }; exit 1 }
 $result = Get-Content -LiteralPath $ResultPath -Raw -Encoding UTF8 | ConvertFrom-Json
 
@@ -23,6 +26,7 @@ $lines.Add("# 任务结果：$($result.task_id)"); $lines.Add('')
 $lines.Add("- 状态：已规范化并通过格式与基线校验")
 $lines.Add("- 项目：$($result.project_path)")
 $lines.Add("- 任务窗口：$($result.thread_id)")
+$lines.Add("- 派发编号：$($result.dispatch_id)")
 $lines.Add("- 开始修订：$($result.base_revision)")
 $lines.Add("- 结束修订：$($result.end_revision)")
 $lines.Add("- 生成时间：$($result.created_at)"); $lines.Add('')

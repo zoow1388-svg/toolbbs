@@ -15,11 +15,14 @@
 - 修改任务的 `allowed_files` 不得相交；无法确定动态写入范围时串行执行。
 - 只读任务可并行，但不得读取或展示敏感数据。
 - 同一任务不得重复派发；派发时记录事件和时间戳。
+- 投递状态依次为 `not-prepared → prepared → sent → acknowledged → result_received`；每次派发使用唯一 `dispatch_id`。
+- 只有宿主任务工具返回消息 ID 后才能记录 `sent`；读取结果时保存游标，拒绝错误任务、窗口或派发编号。
 - 最多等待八个任务；使用返回游标避免重复处理旧结果。
 - 使用 `manage-workflow.ps1` 执行初始化、登记、迁移、读取和审计；不得手改运行状态。
 - 合法主路径是 `draft → awaiting_approval → approved → dispatched → running → verifying → completed`。
 - 开发必须依赖分析，测试必须依赖开发，审查必须同时依赖开发和测试。
 - 标记完成必须同时提供原始结果、规范化结果，并设置已验证标志。
+- v0.3 不允许用通用状态迁移直接进入 `dispatched`，必须通过 `prepare-dispatch` 和 `record-sent`。
 
 ## 返修
 

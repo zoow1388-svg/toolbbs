@@ -37,3 +37,14 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File '.\skill\codex-project-o
 ```
 
 机器 JSON 不直接展示给用户；字段错误或 Git 基线过期时，渲染会失败并指出字段路径。
+
+## v0.3 派发与恢复
+
+先准备不可变派发信封，再在任务工具实际发送成功后记录消息 ID：
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File '.\skill\codex-project-orchestrator\scripts\manage-workflow.ps1' -Action prepare-dispatch -ProjectPath 'D:\目标项目' -TaskId 'ANALYSIS-001'
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File '.\skill\codex-project-orchestrator\scripts\manage-workflow.ps1' -Action record-sent -ProjectPath 'D:\目标项目' -TaskId 'ANALYSIS-001' -DispatchId '返回的派发编号' -MessageId '任务工具返回的消息编号' -Cursor '任务工具返回的游标'
+```
+
+中断恢复时运行 `-Action reconcile`。它只输出下一步决策，不会自行发送消息；真正的跨窗口读取和发送仍由 Codex 桌面版受支持的任务工具完成。
