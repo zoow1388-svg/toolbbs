@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "action-plan.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "workflow_id", "project_path", "based_on_event_sequence", "workflow_state_sha256", "tasks_state_sha256", "generated_at", "actions"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "workflow_id": {"type": "string", "minLength": 1},
+    "project_path": {"type": "string", "pattern": "^[A-Za-z]:\\\\"},
+    "based_on_event_sequence": {"type": "integer", "minimum": 0},
+    "workflow_state_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "tasks_state_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "generated_at": {"type": "string", "format": "date-time"},
+    "actions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["action_id", "type", "task_ids", "based_on_event_sequence", "operation", "parameters", "evidence_required", "state_changing", "authorization_required", "reason"],
+        "properties": {
+          "action_id": {"type": "string", "minLength": 1},
+          "type": {"enum": ["request_authorization", "prepare_dispatch", "send_message", "wait_tasks", "read_result", "normalize_result", "verify_result", "complete_task", "manual_review", "workflow_complete"]},
+          "task_ids": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+          "based_on_event_sequence": {"type": "integer", "minimum": 0},
+          "operation": {"type": "string", "minLength": 1},
+          "parameters": {"type": "object"},
+          "evidence_required": {"type": "array", "items": {"type": "string", "minLength": 1}},
+          "state_changing": {"type": "boolean"},
+          "authorization_required": {"type": ["string", "null"]},
+          "reason": {"type": "string", "minLength": 1}
+        }
+      }
+    }
+  }
+}

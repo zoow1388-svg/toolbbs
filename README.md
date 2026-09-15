@@ -88,3 +88,19 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File '.\skill\codex-project-o
 旧的 `transition -Verified` 已被拒绝，不能由调用者直接声明验证成功。`audit` 会检查原始结果、规范化结果和验证回执，验证后修改任一证据都会失败。
 
 升级时，没有新回执的旧版完成任务会保留历史状态，但标记为 `legacy-unverified`，不能作为后续任务的可信依赖。
+
+## v0.7 统一下一动作
+
+为整个工作流生成不可覆盖的下一动作计划：
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File '.\skill\codex-project-orchestrator\scripts\plan-next-actions.ps1' -ProjectPath 'D:\目标项目' -OutputPath 'D:\目标项目\.codex-orchestrator\plans\next-actions.json'
+```
+
+执行计划中的任何动作前，检查它仍对应当前状态：
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File '.\skill\codex-project-orchestrator\scripts\test-action-plan-current.ps1' -ProjectPath 'D:\目标项目' -PlanPath 'D:\目标项目\.codex-orchestrator\plans\next-actions.json'
+```
+
+计划器不会发送消息或修改任务状态。状态事件序号或状态文件发生变化后，旧计划检查失败，必须生成新文件；不要手工修改旧计划。
