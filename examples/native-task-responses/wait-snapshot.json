@@ -1,0 +1,17 @@
+{
+  "thread_id": "thread-001",
+  "host_id": "local",
+  "status": "idle",
+  "cursor": "cursor-001:12",
+  "revision": 12,
+  "changed": true,
+  "latest_turn_id": "turn-001",
+  "latest_turn_status": "completed",
+  "latest_item_id": "item-001",
+  "latest_item_phase": "final_answer",
+  "result_truncated": true,
+  "original_chars": 4096,
+  "raw_response_path": "D:\\example-project\\.codex-orchestrator\\observations\\wait.json",
+  "raw_response_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "observed_at": "2026-09-15T00:03:00+08:00"
+}

@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "wait-snapshot.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["thread_id", "host_id", "status", "cursor", "revision", "changed", "latest_turn_id", "latest_turn_status", "latest_item_id", "latest_item_phase", "result_truncated", "original_chars", "raw_response_path", "raw_response_sha256", "observed_at"],
+  "properties": {
+    "thread_id": {"type": "string", "minLength": 1},
+    "host_id": {"type": "string", "minLength": 1},
+    "status": {"type": "string", "minLength": 1},
+    "cursor": {"type": "string", "minLength": 1},
+    "revision": {"type": "integer", "minimum": 0},
+    "changed": {"type": "boolean"},
+    "latest_turn_id": {"type": ["string", "null"]},
+    "latest_turn_status": {"type": ["string", "null"]},
+    "latest_item_id": {"type": ["string", "null"]},
+    "latest_item_phase": {"type": ["string", "null"]},
+    "result_truncated": {"type": "boolean"},
+    "original_chars": {"type": ["integer", "null"], "minimum": 0},
+    "raw_response_path": {"type": "string", "minLength": 1},
+    "raw_response_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "observed_at": {"type": "string", "format": "date-time"}
+  }
+}

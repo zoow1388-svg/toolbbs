@@ -17,12 +17,13 @@ Coordinate Codex tasks through supported task tools. Never use window titles, mo
 6. Present the modification plan and wait for explicit implementation approval.
 7. Dispatch only approved tasks. Do not interpret design approval as implementation, Git, deployment, deletion, or external-action approval.
 8. Use `prepare-dispatch` to create an immutable dispatch envelope and `build-dispatch-prompt.ps1` to render the prompt. Send it with the supported task tool, preserve the raw tool receipt, then record its path, optional message ID, and cursor with `record-sent`; never invent an ID or mark an unsent envelope as dispatched.
-9. Record acknowledgement and result messages with the matching task ID, dispatch ID, thread ID, message ID, and cursor. Reject old or mismatched results by following [task-protocol.md](references/task-protocol.md).
-10. Preserve the report unchanged, then normalize it into JSON by following [result-normalization.md](references/result-normalization.md). Never ask the executing task to invent JSON syntax or silently fill missing facts.
-11. Run the manager `audit` action, validate normalized results with JSON Schema and `scripts/validate-result.ps1`, then generate the user-facing UTF-8 Markdown with `scripts/render-result.ps1`. Never expose raw machine JSON as the final user report.
-12. Independently verify Git revision, changed files, commands, tests, and artifacts. A task saying "complete" is not proof.
-13. Advance through analysis, implementation, test, and review gates. Stop on missing evidence, stale results, conflicts, scope expansion, or new authorization requirements.
-14. Produce a truthful delivery report. Mark unexecuted checks as `未执行`.
+9. Save each raw `wait_threads` response, convert it with `import-wait-snapshot.ps1`, and record it with `record-wait`. A wait preview may be truncated and is never the authoritative result.
+10. When the snapshot identifies a completed turn and final item, save a fresh `read_thread` response and use `extract-thread-result.ps1` with those exact IDs. Record the extracted result with the matching task ID, dispatch ID, thread ID, item ID, and cursor. Reject old or mismatched results by following [task-protocol.md](references/task-protocol.md).
+11. Preserve the extracted report unchanged, then normalize it into JSON by following [result-normalization.md](references/result-normalization.md). Never ask the executing task to invent JSON syntax or silently fill missing facts.
+12. Run the manager `audit` action, validate normalized results with JSON Schema and `scripts/validate-result.ps1`, then generate the user-facing UTF-8 Markdown with `scripts/render-result.ps1`. Never expose raw machine JSON as the final user report.
+13. Independently verify Git revision, changed files, commands, tests, and artifacts. A task saying "complete" is not proof.
+14. Advance through analysis, implementation, test, and review gates. Stop on missing evidence, stale results, conflicts, scope expansion, or new authorization requirements.
+15. Produce a truthful delivery report. Mark unexecuted checks as `未执行`.
 
 ## Task tools
 
@@ -38,7 +39,7 @@ Pass comma-separated task dependencies and file paths to the manager CLI. Treat 
 
 When resuming, run `reconcile` before reading or sending. Follow its decision and the saved cursor; `manual_review` requires stopping for inspection rather than guessing or redispatching.
 
-Save raw send receipts and thread observations inside the target project's state directory. Record their paths and hashes with `record-sent` and `record-observation`. Treat message IDs as optional and record them only when the host actually returns them.
+Save raw send receipts, wait responses, and thread reads inside the target project's state directory. Record their paths and hashes. Treat send message IDs as optional and record them only when the host actually returns them; result item IDs are required because full-result extraction is exact.
 
 Do not automatically commit, push, deploy, delete, migrate data, install software, restart services, or use real credentials. Do not overwrite user changes. Allow at most one targeted factual repair with an identified cause; formatting normalization is the controller's responsibility and must not consume a repair attempt.
 

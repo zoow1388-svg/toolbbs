@@ -33,7 +33,7 @@ Describe 'manage-workflow lifecycle' {
     It 'initializes versioned state and an event log' {
         Invoke-Manager @('-Action','initialize','-ProjectPath',$project,'-WorkflowId','WF-001') | Should Be 0
         $workflow = Get-Content (Join-Path $project '.codex-orchestrator\workflow.json') -Raw | ConvertFrom-Json
-        $workflow.state_version | Should Be 4
+        $workflow.state_version | Should Be 5
         $workflow.event_sequence | Should Be 1
         @(Get-Content (Join-Path $project '.codex-orchestrator\events.jsonl')).Count | Should Be 1
     }
@@ -115,7 +115,7 @@ Describe 'manage-workflow lifecycle' {
         Set-Content (Join-Path $state 'tasks.json') '[]'
         Invoke-Manager @('-Action','register','-ProjectPath',$project,'-TaskId','ANALYSIS-001','-ThreadId','thread-1','-Role','analyst','-Objective','analyze') | Should Be 0
         $workflow = Get-Content (Join-Path $state 'workflow.json') -Raw | ConvertFrom-Json
-        $workflow.state_version | Should Be 4
+        $workflow.state_version | Should Be 5
         $workflow.event_sequence | Should Be 1
     }
 
@@ -126,7 +126,7 @@ Describe 'manage-workflow lifecycle' {
         Set-Content (Join-Path $state 'tasks.json') '[]'
         Invoke-Manager @('-Action','register','-ProjectPath',$project,'-TaskId','ANALYSIS-001','-ThreadId','thread-1','-Role','analyst','-Objective','analyze') | Should Be 0
         $workflow = Get-Content (Join-Path $state 'workflow.json') -Raw | ConvertFrom-Json
-        $workflow.state_version | Should Be 4
+        $workflow.state_version | Should Be 5
         (Get-Task $project 'ANALYSIS-001').delivery_status | Should Be 'not-prepared'
     }
 

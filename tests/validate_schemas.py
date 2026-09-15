@@ -8,6 +8,7 @@ import jsonschema
 ROOT = Path(__file__).resolve().parents[1]
 EXAMPLES = ROOT / "examples" / "read-only-analysis"
 SCHEMAS = ROOT / "schemas"
+NATIVE_EXAMPLES = ROOT / "examples" / "native-task-responses"
 
 
 def load_json(path: Path):
@@ -22,6 +23,7 @@ pairs = {
     "event": load_json(EXAMPLES / "event.json"),
     "dispatch": load_json(EXAMPLES / "dispatch.json"),
     "thread-observation": load_json(EXAMPLES / "thread-observation.json"),
+    "wait-snapshot": load_json(NATIVE_EXAMPLES / "wait-snapshot.json"),
 }
 
 for name, document in pairs.items():
@@ -49,4 +51,4 @@ except jsonschema.ValidationError:
 else:
     raise AssertionError("Object changed_files entry unexpectedly passed validation")
 
-print("SCHEMA VALID: 6 positive, 2 negative")
+print("SCHEMA VALID: 7 positive, 2 negative")

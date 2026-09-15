@@ -55,3 +55,9 @@
 ## v0.4 原生任务适配
 
 总控先预检 `list_threads`、`read_thread`、`send_message_to_thread` 和 `wait_threads`。脚本从派发信封生成不可覆盖的提示词，但不直接调用宿主工具。发送回执与任务观察原样保存在项目状态目录并记录 SHA-256；消息 ID 为可选字段，读取游标是增量等待依据。任务、主机或项目路径不一致时关闭门禁。
+
+## v0.5 结果采集
+
+等待层只定位新 revision、完成 turn 和最终 item，不把可能截断的消息预览当作结果。`import-wait-snapshot.ps1` 将原始 `wait_threads` 响应转换为可审计快照；状态层要求 revision 严格递增，并保存快照与原始响应哈希。
+
+完整结果必须来自新的 `read_thread` 原始响应。`extract-thread-result.ps1` 按等待快照中的 thread、turn 和 item 三重身份提取已完成的 `final_answer`，保留原文并计算 SHA-256。恢复决策在拿到精确结果身份后进入 `fetch_full_result`，完成提取后才进入既有规范化和验证链路。

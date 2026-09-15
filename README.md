@@ -58,3 +58,20 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File '.\skill\codex-project-o
 ```
 
 总控使用 Codex 原生任务工具发送提示词，并把原始返回值保存到 `receipts` 后调用 `record-sent`。消息 ID 仅在工具真实返回时传入；任务观察使用 `record-observation` 保存状态和增量游标。
+
+## v0.5 完整结果采集
+
+保存 `wait_threads` 的原始响应后，先生成不含消息正文的快照并记账：
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File '.\skill\codex-project-orchestrator\scripts\import-wait-snapshot.ps1' -RawWaitPath 'D:\目标项目\.codex-orchestrator\observations\wait-001.json' -ExpectedThreadId '任务ID' -ExpectedHostId 'local' -OutputPath 'D:\目标项目\.codex-orchestrator\observations\wait-001.snapshot.json'
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File '.\skill\codex-project-orchestrator\scripts\manage-workflow.ps1' -Action record-wait -ProjectPath 'D:\目标项目' -TaskId 'ANALYSIS-001' -SnapshotPath 'D:\目标项目\.codex-orchestrator\observations\wait-001.snapshot.json'
+```
+
+等待响应中的消息可能被截断。收到完成 turn 和最终 item 身份后，必须保存 `read_thread` 完整响应，再精确提取：
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File '.\skill\codex-project-orchestrator\scripts\extract-thread-result.ps1' -RawThreadPath 'D:\目标项目\.codex-orchestrator\observations\read-001.json' -ExpectedThreadId '任务ID' -ExpectedTurnId '返回的turn ID' -ExpectedItemId '返回的item ID' -OutputPath 'D:\目标项目\.codex-orchestrator\results\ANALYSIS-001.raw.md'
+```
+
+随后用 `record-result` 登记该完整原文。快照 revision 重复、身份不符、证据哈希变化或完整 item 缺失都会关闭门禁。

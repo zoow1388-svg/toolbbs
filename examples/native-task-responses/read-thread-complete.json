@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "thread": {"id": "thread-001", "kind": "codex", "hostId": "local", "status": {"type": "idle"}, "cwd": "D:\\example-project"},
+  "page": {"order": "newest_first", "limit": 3, "nextCursor": null, "hasMore": false},
+  "turns": [{
+    "id": "turn-001",
+    "status": "completed",
+    "error": null,
+    "items": [
+      {"type": "agentMessage", "id": "item-commentary", "text": "working", "phase": "commentary"},
+      {"type": "agentMessage", "id": "item-001", "text": "complete full result", "phase": "final_answer"}
+    ]
+  }]
+}
