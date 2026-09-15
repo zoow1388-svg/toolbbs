@@ -70,10 +70,51 @@ Describe 'manage-workflow lifecycle' {
     It 'initializes versioned state and an event log' {
         Invoke-Manager @('-Action','initialize','-ProjectPath',$project,'-WorkflowId','WF-001') | Should Be 0
         $workflow = Get-Content (Join-Path $project '.codex-orchestrator\workflow.json') -Raw | ConvertFrom-Json
-        $workflow.state_version | Should Be 11
+        $workflow.state_version | Should Be 12
         $workflow.controller_thread_id | Should Be 'controller-1'
         $workflow.event_sequence | Should Be 1
         @(Get-Content (Join-Path $project '.codex-orchestrator\events.jsonl')).Count | Should Be 1
+        @(Get-Content (Join-Path $project '.codex-orchestrator\action-executions.json') -Raw|ConvertFrom-Json).Count | Should Be 0
+    }
+
+    It 'claims one current action and rejects duplicate or stale controllers' {
+        Invoke-Manager @('-Action','initialize','-ProjectPath',$project,'-WorkflowId','WF-001')|Should Be 0
+        Invoke-Manager @('-Action','register','-ProjectPath',$project,'-TaskId','ANALYSIS-001','-ThreadId','thread-1','-Role','analyst','-Objective','analyze')|Should Be 0
+        $planPath=Join-Path $project 'plan.json';powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot '..\skill\codex-project-orchestrator\scripts\plan-next-actions.ps1') -ProjectPath $project -OutputPath $planPath|Out-Null;$LASTEXITCODE|Should Be 0
+        $plan=Get-Content $planPath -Raw -Encoding UTF8|ConvertFrom-Json;$actionId=$plan.actions[0].action_id
+        Invoke-Manager @('-Action','claim-action','-ProjectPath',$project,'-PlanPath',$planPath,'-ActionId',$actionId,'-ExpectedControllerEpoch','1','-LeaseSeconds','60')|Should Be 0
+        Invoke-Manager @('-Action','claim-action','-ProjectPath',$project,'-PlanPath',$planPath,'-ActionId',$actionId,'-ExpectedControllerEpoch','1')|Should Be 1
+        $execution=@(Get-Content (Join-Path $project '.codex-orchestrator\action-executions.json') -Raw -Encoding UTF8|ConvertFrom-Json|ForEach-Object{$_})[0]
+        $execution.status|Should Be 'claimed';$execution.operation_sha256|Should Be $plan.actions[0].operation_sha256
+        Invoke-Manager @('-Action','takeover-controller','-ProjectPath',$project,'-ExpectedControllerThreadId','controller-1','-ExpectedControllerEpoch','1','-ControllerThreadId','controller-2','-TakeoverReason','replace')|Should Be 0
+        $recoveryPlan=Join-Path $project 'recovery-plan.json';powershell.exe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot '..\skill\codex-project-orchestrator\scripts\plan-next-actions.ps1') -ProjectPath $project -OutputPath $recoveryPlan|Out-Null
+        (Get-Content $recoveryPlan -Raw -Encoding UTF8|ConvertFrom-Json).actions[0].type|Should Be 'inspect_action_execution'
+        $evidence=Join-Path $project 'done.json';Set-Content $evidence '{}'
+        Invoke-Manager @('-Action','complete-action','-ProjectPath',$project,'-ExecutionId',$execution.execution_id,'-EvidencePath',$evidence)|Should Be 1
+    }
+
+    It 'completes or fails claimed actions with immutable evidence' {
+        Invoke-Manager @('-Action','initialize','-ProjectPath',$project,'-WorkflowId','WF-001')|Should Be 0
+        Invoke-Manager @('-Action','register','-ProjectPath',$project,'-TaskId','ANALYSIS-001','-ThreadId','thread-1','-Role','analyst','-Objective','analyze')|Should Be 0
+        $planner=Join-Path $PSScriptRoot '..\skill\codex-project-orchestrator\scripts\plan-next-actions.ps1';$planPath=Join-Path $project 'plan.json';powershell.exe -NoProfile -ExecutionPolicy Bypass -File $planner -ProjectPath $project -OutputPath $planPath|Out-Null;$plan=Get-Content $planPath -Raw -Encoding UTF8|ConvertFrom-Json
+        Invoke-Manager @('-Action','claim-action','-ProjectPath',$project,'-PlanPath',$planPath,'-ActionId',$plan.actions[0].action_id,'-ExpectedControllerEpoch','1')|Should Be 0
+        $execution=@(Get-Content (Join-Path $project '.codex-orchestrator\action-executions.json') -Raw -Encoding UTF8|ConvertFrom-Json|ForEach-Object{$_})[0];$evidence=Join-Path $project 'evidence.json';Set-Content $evidence '{"shown":true}'
+        Invoke-Manager @('-Action','renew-action','-ProjectPath',$project,'-ExecutionId',$execution.execution_id,'-LeaseSeconds','600')|Should Be 0
+        Invoke-Manager @('-Action','complete-action','-ProjectPath',$project,'-ExecutionId',$execution.execution_id,'-EvidencePath',$evidence)|Should Be 0
+        Invoke-Manager @('-Action','complete-action','-ProjectPath',$project,'-ExecutionId',$execution.execution_id,'-EvidencePath',$evidence)|Should Be 0
+        Add-Content $evidence 'tamper';Invoke-Manager @('-Action','audit','-ProjectPath',$project)|Should Be 1
+    }
+
+    It 'records a failed action and routes the same logical operation to manual review' {
+        Invoke-Manager @('-Action','initialize','-ProjectPath',$project,'-WorkflowId','WF-001')|Should Be 0
+        Invoke-Manager @('-Action','register','-ProjectPath',$project,'-TaskId','ANALYSIS-001','-ThreadId','thread-1','-Role','analyst','-Objective','analyze')|Should Be 0
+        $planner=Join-Path $PSScriptRoot '..\skill\codex-project-orchestrator\scripts\plan-next-actions.ps1';$planPath=Join-Path $project 'plan.json';powershell.exe -NoProfile -ExecutionPolicy Bypass -File $planner -ProjectPath $project -OutputPath $planPath|Out-Null;$plan=Get-Content $planPath -Raw -Encoding UTF8|ConvertFrom-Json
+        Invoke-Manager @('-Action','claim-action','-ProjectPath',$project,'-PlanPath',$planPath,'-ActionId',$plan.actions[0].action_id,'-ExpectedControllerEpoch','1')|Should Be 0
+        $execution=@(Get-Content (Join-Path $project '.codex-orchestrator\action-executions.json') -Raw -Encoding UTF8|ConvertFrom-Json|ForEach-Object{$_})[0];$evidence=Join-Path $project 'failure.json';Set-Content $evidence '{"exit_code":1}'
+        Invoke-Manager @('-Action','fail-action','-ProjectPath',$project,'-ExecutionId',$execution.execution_id,'-EvidencePath',$evidence,'-ErrorMessage','operation failed')|Should Be 0
+        $recovery=Join-Path $project 'recovery.json';powershell.exe -NoProfile -ExecutionPolicy Bypass -File $planner -ProjectPath $project -OutputPath $recovery|Out-Null;$recoveryPlan=Get-Content $recovery -Raw -Encoding UTF8|ConvertFrom-Json
+        $recoveryPlan.actions[0].type|Should Be 'manual_review';$recoveryPlan.actions[0].parameters.execution_id|Should Be $execution.execution_id
+        Invoke-Manager @('-Action','audit','-ProjectPath',$project)|Should Be 0
     }
 
     It 'rejects duplicate thread ids' {
@@ -86,7 +127,7 @@ Describe 'manage-workflow lifecycle' {
         $state=Join-Path $project '.codex-orchestrator';New-Item -ItemType Directory $state|Out-Null;$now=(Get-Date).ToUniversalTime().ToString('o')
         @{workflow_id='WF-OLD';project_path=$project;state_version=7;status='draft';current_stage='analysis';authorization='read-only';event_sequence=0;created_at=$now;updated_at=$now}|ConvertTo-Json|Set-Content (Join-Path $state 'workflow.json');Set-Content (Join-Path $state 'tasks.json') '[]';Set-Content (Join-Path $state 'events.jsonl') -Value @()
         Invoke-Manager @('-Action','configure-controller','-ProjectPath',$project,'-ControllerThreadId','controller-new')|Should Be 0
-        $workflow=Get-Content (Join-Path $state 'workflow.json') -Raw|ConvertFrom-Json;$workflow.controller_thread_id|Should Be 'controller-new';$workflow.state_version|Should Be 11
+        $workflow=Get-Content (Join-Path $state 'workflow.json') -Raw|ConvertFrom-Json;$workflow.controller_thread_id|Should Be 'controller-new';$workflow.state_version|Should Be 12
         Invoke-Manager @('-Action','configure-controller','-ProjectPath',$project,'-ControllerThreadId','controller-new')|Should Be 0
         Invoke-Manager @('-Action','configure-controller','-ProjectPath',$project,'-ControllerThreadId','controller-other')|Should Be 1
     }
@@ -232,7 +273,7 @@ Describe 'manage-workflow lifecycle' {
         Set-Content (Join-Path $state 'tasks.json') '[]'
         Invoke-Manager @('-Action','register','-ProjectPath',$project,'-TaskId','ANALYSIS-001','-ThreadId','thread-1','-Role','analyst','-Objective','analyze') | Should Be 0
         $workflow = Get-Content (Join-Path $state 'workflow.json') -Raw | ConvertFrom-Json
-        $workflow.state_version | Should Be 11
+        $workflow.state_version | Should Be 12
         $workflow.event_sequence | Should Be 1
     }
 
@@ -243,7 +284,7 @@ Describe 'manage-workflow lifecycle' {
         Set-Content (Join-Path $state 'tasks.json') '[]'
         Invoke-Manager @('-Action','register','-ProjectPath',$project,'-TaskId','ANALYSIS-001','-ThreadId','thread-1','-Role','analyst','-Objective','analyze') | Should Be 0
         $workflow = Get-Content (Join-Path $state 'workflow.json') -Raw | ConvertFrom-Json
-        $workflow.state_version | Should Be 11
+        $workflow.state_version | Should Be 12
         (Get-Task $project 'ANALYSIS-001').delivery_status | Should Be 'not-prepared'
     }
 
@@ -256,7 +297,7 @@ Describe 'manage-workflow lifecycle' {
         foreach($name in @('normalized_result_sha256','verification_receipt_path','verification_receipt_sha256','verified_at','latest_turn_status','latest_item_phase')){$tasks[0].PSObject.Properties.Remove($name)}
         $tasks|ConvertTo-Json -Depth 20|Set-Content (Join-Path $state 'tasks.json')
         Invoke-Manager @('-Action','transition','-ProjectPath',$project,'-TaskId','ANALYSIS-001','-ToStatus','awaiting_approval','-Reason','upgrade') | Should Be 0
-        (Get-Content (Join-Path $state 'workflow.json') -Raw|ConvertFrom-Json).state_version | Should Be 11
+        (Get-Content (Join-Path $state 'workflow.json') -Raw|ConvertFrom-Json).state_version | Should Be 12
         $upgraded=Get-Task $project 'ANALYSIS-001';$upgraded.PSObject.Properties.Name -contains 'verification_receipt_path' | Should Be $true;$upgraded.PSObject.Properties.Name -contains 'latest_turn_status'|Should Be $true;$upgraded.latest_item_phase|Should Be $null
     }
 

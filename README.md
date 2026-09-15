@@ -150,3 +150,13 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File '.\skill\codex-project-o
 使用返回的不可变 `payload` 调用 Codex 任务工具。只有工具真实成功后，保存原始响应并执行 `complete-external-action`；随后按动作计划用同一 `ExternalActionId` 调用 `record-sent` 或 `record-callback-ack`。状态管理器拒绝没有已完成事务支撑的发送回执。
 
 若总控在工具调用前后断开，事务保持 `prepared`，计划器只生成 `inspect_external_action`，不会自动重发。确认未送达后用证据文件执行 `cancel-external-action` 才能产生下一次尝试；确认已送达则用原始回执完成事务。接管后的新总控处理旧任期动作时必须额外提供独立投递证据。
+
+## v1.3 动作执行租约与检查点
+
+执行动作计划中的任一动作前，先认领它：
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File '.\skill\codex-project-orchestrator\scripts\manage-workflow.ps1' -Action claim-action -ProjectPath 'D:\目标项目' -PlanPath 'D:\目标项目\.codex-orchestrator\plans\next-actions.json' -ActionId '计划中的动作ID' -ExpectedControllerEpoch 1
+```
+
+认领结果写入 `action-executions.json`，包含不可变动作哈希和最长一小时的租约。长动作可以在租约到期前使用 `renew-action` 续期；完成或失败分别使用 `complete-action`、`fail-action` 并提供真实证据文件。重复唤醒、租约过期或控制器接管时，未解决动作只进入 `inspect_action_execution`，不会自动执行第二次。

@@ -28,6 +28,7 @@ pairs = {
     "action-plan": load_json(EXAMPLES / "action-plan.json"),
     "callback-receipt": load_json(EXAMPLES / "callback-receipt.json"),
     "external-action": load_json(EXAMPLES / "external-action.json"),
+    "action-execution": load_json(EXAMPLES / "action-execution.json"),
 }
 
 for name, document in pairs.items():
@@ -55,4 +56,4 @@ except jsonschema.ValidationError:
 else:
     raise AssertionError("Object changed_files entry unexpectedly passed validation")
 
-print("SCHEMA VALID: 11 positive, 2 negative")
+print("SCHEMA VALID: 12 positive, 2 negative")

@@ -64,6 +64,12 @@ function Read-ExternalActions([string]$StateDirectory){
     @(Read-StateJson $path|ForEach-Object{$_})
 }
 
+function Read-ActionExecutions([string]$StateDirectory){
+    $path=Join-Path $StateDirectory 'action-executions.json'
+    if(-not(Test-Path -LiteralPath $path)){return @()}
+    @(Read-StateJson $path|ForEach-Object{$_})
+}
+
 function Add-Defaults {
     param($Workflow,[object[]]$Tasks)
     if ($Workflow.PSObject.Properties.Match('state_version').Count -eq 0) { Add-Member -InputObject $Workflow -NotePropertyName state_version -NotePropertyValue 2 }
@@ -106,7 +112,7 @@ function Add-Defaults {
             Add-Member -InputObject $task -NotePropertyName verification_status -NotePropertyValue $verificationStatus
         }
     }
-    if ([int]$Workflow.state_version -lt 11) { $Workflow.state_version = 11 }
+    if ([int]$Workflow.state_version -lt 12) { $Workflow.state_version = 12 }
 }
 
 function Write-Event {
@@ -125,12 +131,13 @@ function Initialize-WorkflowState {
         $workflowPath = Join-Path $state 'workflow.json'
         if (Test-Path -LiteralPath $workflowPath) { throw 'Workflow already exists.' }
         $now = Get-UtcTimestamp
-        $workflow = [ordered]@{ workflow_id=$WorkflowId; project_path=$resolved; state_version=11; controller_thread_id=$(if([string]::IsNullOrWhiteSpace($ControllerThreadId)){$null}else{$ControllerThreadId}); controller_host_id=$(if([string]::IsNullOrWhiteSpace($ControllerThreadId)){$null}else{$ControllerHostId}); controller_epoch=$(if([string]::IsNullOrWhiteSpace($ControllerThreadId)){0}else{1}); controller_history=@(); status='draft'; current_stage='analysis'; authorization='read-only'; event_sequence=0; created_at=$now; updated_at=$now }
+        $workflow = [ordered]@{ workflow_id=$WorkflowId; project_path=$resolved; state_version=12; controller_thread_id=$(if([string]::IsNullOrWhiteSpace($ControllerThreadId)){$null}else{$ControllerThreadId}); controller_host_id=$(if([string]::IsNullOrWhiteSpace($ControllerThreadId)){$null}else{$ControllerHostId}); controller_epoch=$(if([string]::IsNullOrWhiteSpace($ControllerThreadId)){0}else{1}); controller_history=@(); status='draft'; current_stage='analysis'; authorization='read-only'; event_sequence=0; created_at=$now; updated_at=$now }
         $tasks = @()
         Write-Event $state $workflow 'workflow_initialized' $null $null 'draft' 'initialization'
         Write-JsonAtomic $workflow $workflowPath
         Write-JsonAtomic $tasks (Join-Path $state 'tasks.json')
         Write-JsonAtomic @() (Join-Path $state 'external-actions.json')
+        Write-JsonAtomic @() (Join-Path $state 'action-executions.json')
     }
 }
 
@@ -197,6 +204,57 @@ function Cancel-WorkflowExternalAction {
         Write-Event $state $workflow 'external_action_cancelled' $action.task_id 'prepared' 'cancelled' $ActionId
         $workflow.updated_at=Get-UtcTimestamp;Write-JsonAtomic $workflow $workflowPath;Write-JsonAtomic $tasks $tasksPath;Write-JsonAtomic $actions $actionsPath
         $action
+    }
+}
+
+function Claim-WorkflowAction {
+    param([string]$ProjectPath,[string]$PlanPath,[string]$ActionId,[int64]$ExpectedControllerEpoch,[int]$LeaseSeconds=300)
+    if($LeaseSeconds -lt 30 -or $LeaseSeconds -gt 3600){throw 'LeaseSeconds must be between 30 and 3600.'}
+    $state=Join-Path ([IO.Path]::GetFullPath($ProjectPath)) '.codex-orchestrator'
+    Invoke-WithStateLock $state {
+        $workflowPath=Join-Path $state 'workflow.json';$tasksPath=Join-Path $state 'tasks.json';$externalPath=Join-Path $state 'external-actions.json';$executionsPath=Join-Path $state 'action-executions.json'
+        $workflow=Read-StateJson $workflowPath;$tasks=@(Read-StateJson $tasksPath|ForEach-Object{$_});Add-Defaults $workflow $tasks
+        if([int64]$workflow.controller_epoch -ne $ExpectedControllerEpoch){throw 'STALE_CONTROLLER_LEASE: controller epoch changed.'}
+        if([int64]$workflow.controller_epoch -lt 1 -or [string]::IsNullOrWhiteSpace([string]$workflow.controller_thread_id) -or [string]::IsNullOrWhiteSpace([string]$workflow.controller_host_id)){throw 'A configured controller is required to claim an action.'}
+        if(-not(Test-Path -LiteralPath $PlanPath)){throw 'Action plan file not found.'};$resolvedPlan=[IO.Path]::GetFullPath($PlanPath);$plan=Read-StateJson $resolvedPlan
+        if($plan.schema_version -ne 4 -or $plan.workflow_id -ne $workflow.workflow_id -or [int64]$plan.controller_epoch -ne [int64]$workflow.controller_epoch -or $plan.controller_thread_id -ne $workflow.controller_thread_id -or $plan.controller_host_id -ne $workflow.controller_host_id){throw 'STALE_ACTION_PLAN: plan identity changed.'}
+        foreach($pair in @(@($plan.workflow_state_sha256,$workflowPath),@($plan.tasks_state_sha256,$tasksPath),@($plan.external_actions_sha256,$externalPath),@($plan.action_executions_sha256,$executionsPath))){$actual=$(if(Test-Path -LiteralPath $pair[1]){(Get-FileHash $pair[1] -Algorithm SHA256).Hash.ToLowerInvariant()}else{$null});if($pair[0] -ne $actual){throw 'STALE_ACTION_PLAN: state changed.'}}
+        $action=@($plan.actions|Where-Object{$_.action_id -eq $ActionId});if($action.Count -ne 1){throw 'Action not found exactly once in plan.'};$action=$action[0]
+        $executions=@(Read-ActionExecutions $state);if(@($executions|Where-Object{$_.action_id -eq $ActionId}).Count){throw 'ACTION_ALREADY_CLAIMED: inspect the existing execution checkpoint.'}
+        $now=[DateTime]::UtcNow;$executionId="$ActionId`:execution";$record=[pscustomobject][ordered]@{execution_id=$executionId;action_id=$ActionId;action_type=$action.type;task_ids=@($action.task_ids);operation_sha256=$action.operation_sha256;plan_path=$resolvedPlan;plan_sha256=(Get-FileHash $resolvedPlan -Algorithm SHA256).Hash.ToLowerInvariant();action_sha256=(Get-ObjectSha256 $action);controller_thread_id=$workflow.controller_thread_id;controller_host_id=$workflow.controller_host_id;controller_epoch=[int64]$workflow.controller_epoch;status='claimed';lease_expires_at=$now.AddSeconds($LeaseSeconds).ToString('o');evidence_path=$null;evidence_sha256=$null;error=$null;claimed_at=$now.ToString('o');completed_at=$null;failed_at=$null}
+        $executions+=$record;Write-Event $state $workflow 'action_claimed' $(@($action.task_ids)-join ',') $null 'claimed' $executionId;$workflow.updated_at=Get-UtcTimestamp
+        Write-JsonAtomic $workflow $workflowPath;Write-JsonAtomic $tasks $tasksPath;Write-JsonAtomic $executions $executionsPath;$record
+    }
+}
+
+function Set-WorkflowActionExecutionResult {
+    param([string]$ProjectPath,[string]$ExecutionId,[ValidateSet('completed','failed')][string]$Status,[string]$EvidencePath,[string]$ErrorMessage)
+    $state=Join-Path ([IO.Path]::GetFullPath($ProjectPath)) '.codex-orchestrator'
+    Invoke-WithStateLock $state {
+        $workflowPath=Join-Path $state 'workflow.json';$tasksPath=Join-Path $state 'tasks.json';$executionsPath=Join-Path $state 'action-executions.json'
+        $workflow=Read-StateJson $workflowPath;$tasks=@(Read-StateJson $tasksPath|ForEach-Object{$_});Add-Defaults $workflow $tasks;$executions=@(Read-ActionExecutions $state)
+        $record=@($executions|Where-Object{$_.execution_id -eq $ExecutionId});if($record.Count -ne 1){throw 'Action execution not found.'};$record=$record[0]
+        if($record.status -eq $Status){if(-not(Test-Path -LiteralPath $EvidencePath) -or (Get-FileHash $EvidencePath -Algorithm SHA256).Hash.ToLowerInvariant() -ne $record.evidence_sha256){throw 'Action execution evidence does not match.'};return $record}
+        if($record.status -ne 'claimed'){throw 'Only a claimed action execution can be resolved.'}
+        if($record.controller_epoch -ne $workflow.controller_epoch -or $record.controller_thread_id -ne $workflow.controller_thread_id -or $record.controller_host_id -ne $workflow.controller_host_id){throw 'STALE_CONTROLLER_LEASE: action belongs to another controller lease.'}
+        if([DateTime]::Parse($record.lease_expires_at).ToUniversalTime() -lt [DateTime]::UtcNow){throw 'ACTION_LEASE_EXPIRED: inspect the execution before recovery.'}
+        if(-not(Test-Path -LiteralPath $EvidencePath)){throw 'Action execution evidence file not found.'};if($Status -eq 'failed' -and [string]::IsNullOrWhiteSpace($ErrorMessage)){throw 'ErrorMessage is required for failed execution.'}
+        $resolved=[IO.Path]::GetFullPath($EvidencePath);$record.evidence_path=$resolved;$record.evidence_sha256=(Get-FileHash $resolved -Algorithm SHA256).Hash.ToLowerInvariant();$record.status=$Status;$record.error=$(if($Status -eq 'failed'){$ErrorMessage}else{$null});$now=Get-UtcTimestamp
+        if($Status -eq 'completed'){$record.completed_at=$now}else{$record.failed_at=$now};Write-Event $state $workflow "action_$Status" $(@($record.task_ids)-join ',') 'claimed' $Status $ExecutionId;$workflow.updated_at=$now
+        Write-JsonAtomic $workflow $workflowPath;Write-JsonAtomic $tasks $tasksPath;Write-JsonAtomic $executions $executionsPath;$record
+    }
+}
+
+function Renew-WorkflowActionLease {
+    param([string]$ProjectPath,[string]$ExecutionId,[int]$LeaseSeconds=300)
+    if($LeaseSeconds -lt 30 -or $LeaseSeconds -gt 3600){throw 'LeaseSeconds must be between 30 and 3600.'}
+    $state=Join-Path ([IO.Path]::GetFullPath($ProjectPath)) '.codex-orchestrator'
+    Invoke-WithStateLock $state {
+        $workflowPath=Join-Path $state 'workflow.json';$tasksPath=Join-Path $state 'tasks.json';$executionsPath=Join-Path $state 'action-executions.json';$workflow=Read-StateJson $workflowPath;$tasks=@(Read-StateJson $tasksPath|ForEach-Object{$_});Add-Defaults $workflow $tasks;$executions=@(Read-ActionExecutions $state)
+        $record=@($executions|Where-Object{$_.execution_id -eq $ExecutionId});if($record.Count -ne 1){throw 'Action execution not found.'};$record=$record[0]
+        if($record.status -ne 'claimed'){throw 'Only a claimed action lease can be renewed.'};if($record.controller_epoch -ne $workflow.controller_epoch -or $record.controller_thread_id -ne $workflow.controller_thread_id -or $record.controller_host_id -ne $workflow.controller_host_id){throw 'STALE_CONTROLLER_LEASE: action belongs to another controller lease.'}
+        if([DateTime]::Parse($record.lease_expires_at).ToUniversalTime() -lt [DateTime]::UtcNow){throw 'ACTION_LEASE_EXPIRED: expired leases require inspection.'}
+        $record.lease_expires_at=[DateTime]::UtcNow.AddSeconds($LeaseSeconds).ToString('o');Write-Event $state $workflow 'action_lease_renewed' $(@($record.task_ids)-join ',') 'claimed' 'claimed' $ExecutionId;$workflow.updated_at=Get-UtcTimestamp;Write-JsonAtomic $workflow $workflowPath;Write-JsonAtomic $tasks $tasksPath;Write-JsonAtomic $executions $executionsPath;$record
     }
 }
 
@@ -586,6 +644,19 @@ function Test-WorkflowStateIntegrity {
         if($started -ne 1 -or ($externalAction.status -eq 'prepared' -and ($completed -ne 0 -or $cancelled -ne 0)) -or ($externalAction.status -eq 'completed' -and ($completed -ne 1 -or $cancelled -ne 0)) -or ($externalAction.status -eq 'cancelled' -and ($completed -ne 0 -or $cancelled -ne 1))){throw "External action event history mismatch: $($externalAction.action_id)"}
     }
     foreach($group in @($externalActions|Group-Object task_id,action_type)){ $ordered=@($group.Group|Sort-Object attempt);for($attemptIndex=0;$attemptIndex -lt $ordered.Count;$attemptIndex++){if([int]$ordered[$attemptIndex].attempt -ne ($attemptIndex+1)){throw "External action attempt sequence is invalid: $($group.Name)"}} }
+    $actionExecutions=@(Read-ActionExecutions $state)
+    if(@($actionExecutions|Group-Object execution_id|Where-Object Count -gt 1).Count -or @($actionExecutions|Group-Object action_id|Where-Object Count -gt 1).Count){throw 'Duplicate action execution checkpoint detected.'}
+    foreach($execution in $actionExecutions){
+        if($execution.status -notin @('claimed','completed','failed')){throw "Invalid action execution status: $($execution.execution_id)"}
+        if([string]::IsNullOrWhiteSpace($execution.operation_sha256) -or [string]::IsNullOrWhiteSpace($execution.plan_path) -or -not(Test-Path -LiteralPath $execution.plan_path) -or (Get-FileHash $execution.plan_path -Algorithm SHA256).Hash.ToLowerInvariant() -ne $execution.plan_sha256){throw "Action execution plan evidence mismatch: $($execution.execution_id)"}
+        $plan=Read-StateJson $execution.plan_path;$planAction=@($plan.actions|Where-Object{$_.action_id -eq $execution.action_id});if($planAction.Count -ne 1 -or (Get-ObjectSha256 $planAction[0]) -ne $execution.action_sha256 -or $planAction[0].operation_sha256 -ne $execution.operation_sha256){throw "Action execution snapshot mismatch: $($execution.execution_id)"}
+        if([int64]$execution.controller_epoch -gt [int64]$workflow.controller_epoch){throw "Action execution controller epoch is invalid: $($execution.execution_id)"}
+        $executionLease=$(if([int64]$execution.controller_epoch -eq [int64]$workflow.controller_epoch){$workflow}else{@($workflow.controller_history|Where-Object{[int64]$_.epoch -eq [int64]$execution.controller_epoch})[0]});$executionThread=$(if($executionLease.PSObject.Properties.Match('controller_thread_id').Count){$executionLease.controller_thread_id}else{$executionLease.thread_id});$executionHost=$(if($executionLease.PSObject.Properties.Match('controller_host_id').Count){$executionLease.controller_host_id}else{$executionLease.host_id})
+        if($executionThread -ne $execution.controller_thread_id -or $executionHost -ne $execution.controller_host_id){throw "Action execution controller identity mismatch: $($execution.execution_id)"}
+        if($execution.status -in @('completed','failed') -and ([string]::IsNullOrWhiteSpace($execution.evidence_path) -or -not(Test-Path -LiteralPath $execution.evidence_path) -or (Get-FileHash $execution.evidence_path -Algorithm SHA256).Hash.ToLowerInvariant() -ne $execution.evidence_sha256)){throw "Action execution evidence mismatch: $($execution.execution_id)"}
+        $claimed=@($events|Where-Object{$_.type -eq 'action_claimed' -and $_.reason -eq $execution.execution_id}).Count;$resolved=$(if($execution.status -eq 'claimed'){0}else{@($events|Where-Object{$_.type -eq "action_$($execution.status)" -and $_.reason -eq $execution.execution_id}).Count})
+        if($claimed -ne 1 -or ($execution.status -eq 'claimed' -and $resolved -ne 0) -or ($execution.status -ne 'claimed' -and $resolved -ne 1)){throw "Action execution event history mismatch: $($execution.execution_id)"}
+    }
     foreach ($task in $tasks) {
         if ($task.delivery_status -ne 'not-prepared' -and ([string]::IsNullOrWhiteSpace($task.dispatch_id) -or [string]::IsNullOrWhiteSpace($task.dispatch_path) -or -not (Test-Path -LiteralPath $task.dispatch_path))) { throw "Task dispatch evidence is incomplete: $($task.task_id)" }
         if ($task.delivery_status -in @('sent','acknowledged','result_received') -and ([string]::IsNullOrWhiteSpace($task.send_receipt_path) -or [string]::IsNullOrWhiteSpace($task.send_receipt_sha256) -or -not(Test-Path -LiteralPath $task.send_receipt_path) -or [string]::IsNullOrWhiteSpace($task.dispatched_at))) { throw "Task send evidence is incomplete: $($task.task_id)" }
@@ -626,7 +697,7 @@ function Get-WorkflowState {
     param([string]$ProjectPath)
     $state = Join-Path ([System.IO.Path]::GetFullPath($ProjectPath)) '.codex-orchestrator'
     $workflow=Read-StateJson (Join-Path $state 'workflow.json');$tasks=@(Read-StateJson (Join-Path $state 'tasks.json')|ForEach-Object{$_});Add-Defaults $workflow $tasks
-    [ordered]@{workflow=$workflow;tasks=$tasks;external_actions=@(Read-ExternalActions $state)}
+    [ordered]@{workflow=$workflow;tasks=$tasks;external_actions=@(Read-ExternalActions $state);action_executions=@(Read-ActionExecutions $state)}
 }
 
-Export-ModuleMember -Function Initialize-WorkflowState,Set-WorkflowController,Set-WorkflowControllerTakeover,Register-WorkflowTask,Set-WorkflowTaskState,New-WorkflowDispatch,Start-WorkflowExternalAction,Complete-WorkflowExternalAction,Cancel-WorkflowExternalAction,Confirm-WorkflowDispatchSent,Confirm-WorkflowAcknowledged,Receive-WorkflowCallback,Confirm-WorkflowCallbackAcknowledged,Receive-WorkflowResult,Confirm-WorkflowResultVerified,Record-WorkflowThreadObservation,Record-WorkflowWaitSnapshot,Get-WorkflowReconciliation,Get-WorkflowState,Test-WorkflowStateIntegrity
+Export-ModuleMember -Function Initialize-WorkflowState,Set-WorkflowController,Set-WorkflowControllerTakeover,Register-WorkflowTask,Set-WorkflowTaskState,New-WorkflowDispatch,Start-WorkflowExternalAction,Complete-WorkflowExternalAction,Cancel-WorkflowExternalAction,Claim-WorkflowAction,Renew-WorkflowActionLease,Set-WorkflowActionExecutionResult,Confirm-WorkflowDispatchSent,Confirm-WorkflowAcknowledged,Receive-WorkflowCallback,Confirm-WorkflowCallbackAcknowledged,Receive-WorkflowResult,Confirm-WorkflowResultVerified,Record-WorkflowThreadObservation,Record-WorkflowWaitSnapshot,Get-WorkflowReconciliation,Get-WorkflowState,Test-WorkflowStateIntegrity

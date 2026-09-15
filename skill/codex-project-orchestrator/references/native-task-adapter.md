@@ -12,6 +12,7 @@
 - 总控被唤醒后保存原始消息，用 `import-callback-receipt.ps1` 校验并生成回执，再执行 `record-callback`。动作计划随后只生成一次 `send_callback_ack`；真实发送后用 `record-callback-ack` 保存工具回执。
 - 调用 `send_message_to_thread` 前先执行 `begin-external-action`，并且只使用返回的负载。调用后原样保存工具返回值，完成外部动作事务，再使用同一动作 ID 执行 `record-sent` 或 `record-callback-ack`。消息 ID 仅在真实返回时记录；不得猜测。
 - 恢复时看到未决 `prepared` 外部动作，先检查目标任务和宿主记录，不得再次调用发送工具。
+- 调用任何计划动作前先 `claim-action`。宿主等待、读取和发送结果都保存为完成证据；未决或失败检查点必须先检查，不得由第二个总控实例并行执行。
 - 用 `wait_threads` 等待最多八个任务，原样保存响应，再用 `import-wait-snapshot.ps1` 提取 revision、游标、turn ID、item ID 和截断标记；后续等待传入上次返回的游标。
 - `wait_threads` 中的 `latestAssistantMessage.text` 只可作为预览。即使状态完成，只要需要结果正文，都必须调用 `read_thread` 获取完整响应。
 - 只有 `latestTurn.status=completed` 且 `latestAssistantMessage.phase=final_answer` 时才能生成读取结果动作；活动 commentary 只能作为进度证据。

@@ -2,6 +2,10 @@ Set-StrictMode -Version 2.0
 $ErrorActionPreference='Stop'
 
 function Get-FileSha256([string]$Path){(Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()}
+function Get-ValueSha256($Value){
+    $bytes=[Text.UTF8Encoding]::new($false).GetBytes(($Value|ConvertTo-Json -Depth 20 -Compress));$sha=[Security.Cryptography.SHA256]::Create()
+    try{([BitConverter]::ToString($sha.ComputeHash($bytes))).Replace('-','').ToLowerInvariant()}finally{$sha.Dispose()}
+}
 function New-WaitTarget($Task,[string]$Purpose){
     $target=[ordered]@{task_id=$Task.task_id;threadId=$Task.thread_id;hostId=$Task.host_id;purpose=$Purpose}
     if(-not [string]::IsNullOrWhiteSpace([string]$Task.read_cursor)){$target.afterCursor=$Task.read_cursor}
@@ -21,15 +25,24 @@ function New-WorkflowActionPlan {
     $tasks=@($currentState.tasks)
     $externalActionsPath=Join-Path $stateDirectory 'external-actions.json'
     $externalActions=$(if(Test-Path -LiteralPath $externalActionsPath){@(Get-Content -LiteralPath $externalActionsPath -Raw -Encoding UTF8|ConvertFrom-Json|ForEach-Object{$_})}else{@()})
+    $actionExecutionsPath=Join-Path $stateDirectory 'action-executions.json'
+    $actionExecutions=$(if(Test-Path -LiteralPath $actionExecutionsPath){@(Get-Content -LiteralPath $actionExecutionsPath -Raw -Encoding UTF8|ConvertFrom-Json|ForEach-Object{$_})}else{@()})
     $actions=[Collections.Generic.List[object]]::new();$waitTargets=[Collections.Generic.List[object]]::new()
     $sequence=[int64]$workflow.event_sequence
 
     function Add-Action([string]$Type,[object[]]$TaskIds,[string]$Operation,$Parameters,[string[]]$Evidence,[bool]$StateChanging,$Authorization,[string]$Reason){
         $key=$(if($TaskIds.Count -eq 0){'workflow'}else{($TaskIds -join '+')})
+        $operationHash=Get-ValueSha256 ([ordered]@{type=$Type;task_ids=@($TaskIds);operation=$Operation;parameters=$Parameters})
+        $unresolved=@($actionExecutions|Where-Object{$_.operation_sha256 -eq $operationHash -and $_.status -in @('claimed','failed')}|Sort-Object claimed_at)
+        if($unresolved.Count){
+            $checkpoint=$unresolved[-1];$checkpointType=$(if($checkpoint.status -eq 'claimed'){'inspect_action_execution'}else{'manual_review'})
+            $actions.Add([pscustomobject][ordered]@{action_id="$($checkpoint.action_id):checkpoint";type=$checkpointType;task_ids=@($TaskIds);based_on_event_sequence=$sequence;operation='inspect_action_execution';parameters=[ordered]@{execution_id=$checkpoint.execution_id;status=$checkpoint.status;lease_expires_at=$checkpoint.lease_expires_at};operation_sha256=$operationHash;evidence_required=@('action execution checkpoint','operation evidence');state_changing=$false;authorization_required='explicit-user-direction';reason='An earlier execution of this logical action is unresolved; do not execute it again.'})
+            return
+        }
         $actions.Add([pscustomobject][ordered]@{
             action_id="$($workflow.workflow_id):$($workflow.controller_epoch):$sequence`:$Type`:$key";type=$Type;task_ids=@($TaskIds)
             based_on_event_sequence=$sequence;operation=$Operation;parameters=$Parameters;evidence_required=@($Evidence)
-            state_changing=$StateChanging;authorization_required=$Authorization;reason=$Reason
+            operation_sha256=$operationHash;state_changing=$StateChanging;authorization_required=$Authorization;reason=$Reason
         })
     }
 
@@ -125,8 +138,8 @@ function New-WorkflowActionPlan {
         Add-Action 'workflow_complete' @() 'report_completion' ([ordered]@{workflow_id=$workflow.workflow_id}) @('successful workflow audit','final delivery report') $false $null 'Every task is trusted complete.'
     }
     [pscustomobject][ordered]@{
-        schema_version=3;workflow_id=$workflow.workflow_id;project_path=$resolvedProject;controller_thread_id=$workflow.controller_thread_id;controller_host_id=$workflow.controller_host_id;controller_epoch=[int64]$workflow.controller_epoch;based_on_event_sequence=$sequence
-        workflow_state_sha256=(Get-FileSha256 $workflowPath);tasks_state_sha256=(Get-FileSha256 $tasksPath);external_actions_sha256=$(if(Test-Path -LiteralPath $externalActionsPath){Get-FileSha256 $externalActionsPath}else{$null})
+        schema_version=4;workflow_id=$workflow.workflow_id;project_path=$resolvedProject;controller_thread_id=$workflow.controller_thread_id;controller_host_id=$workflow.controller_host_id;controller_epoch=[int64]$workflow.controller_epoch;based_on_event_sequence=$sequence
+        workflow_state_sha256=(Get-FileSha256 $workflowPath);tasks_state_sha256=(Get-FileSha256 $tasksPath);external_actions_sha256=$(if(Test-Path -LiteralPath $externalActionsPath){Get-FileSha256 $externalActionsPath}else{$null});action_executions_sha256=$(if(Test-Path -LiteralPath $actionExecutionsPath){Get-FileSha256 $actionExecutionsPath}else{$null})
         generated_at=(Get-Date).ToUniversalTime().ToString('o');actions=@($actions)
     }
 }
