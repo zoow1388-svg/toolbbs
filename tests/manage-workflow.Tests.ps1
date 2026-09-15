@@ -24,6 +24,17 @@ function Get-ReconcileDecision([string]$Project,[string]$TaskId) {
     (($output[0..($output.Count - 2)] -join "`n") | ConvertFrom-Json).decision
 }
 
+function Write-NormalizedResult([string]$Path,[string]$Project,[string]$TaskId,[string]$ThreadId,[string]$DispatchId,[string]$MessageId) {
+    $value=[ordered]@{
+        task_id=$TaskId;dispatch_id=$DispatchId;thread_id=$ThreadId;host_id='local';project_path=$Project
+        base_revision='unborn';end_revision='unborn';summary='verified result';preexisting_changes=@();changed_files=@()
+        commands=@();checks=@();artifacts=@();unexecuted=@();blockers=@();risks=@();required_authorization=$null
+        created_at=(Get-Date).ToUniversalTime().ToString('o')
+        normalization=[ordered]@{normalized_by='controller';source_thread_id=$ThreadId;source_message_id=$MessageId;source_format='text';decisions=@()}
+    }
+    [IO.File]::WriteAllText($Path,($value|ConvertTo-Json -Depth 10),[Text.UTF8Encoding]::new($false))
+}
+
 Describe 'manage-workflow lifecycle' {
     BeforeEach {
         $project = Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
@@ -33,7 +44,7 @@ Describe 'manage-workflow lifecycle' {
     It 'initializes versioned state and an event log' {
         Invoke-Manager @('-Action','initialize','-ProjectPath',$project,'-WorkflowId','WF-001') | Should Be 0
         $workflow = Get-Content (Join-Path $project '.codex-orchestrator\workflow.json') -Raw | ConvertFrom-Json
-        $workflow.state_version | Should Be 5
+        $workflow.state_version | Should Be 6
         $workflow.event_sequence | Should Be 1
         @(Get-Content (Join-Path $project '.codex-orchestrator\events.jsonl')).Count | Should Be 1
     }
@@ -89,13 +100,20 @@ Describe 'manage-workflow lifecycle' {
         foreach ($state in @('awaiting_approval','approved')) { Invoke-Manager @('-Action','transition','-ProjectPath',$project,'-TaskId','ANALYSIS-001','-ToStatus',$state,'-Reason','advance') | Should Be 0 }
         $dispatchId = Start-Task $project 'ANALYSIS-001'
         $raw = Join-Path $project 'raw.md'; $normalized = Join-Path $project 'result.json'
-        Set-Content $raw 'raw'; [IO.File]::WriteAllText($normalized,([ordered]@{task_id='ANALYSIS-001';thread_id='thread-1';dispatch_id=$dispatchId}|ConvertTo-Json),[Text.UTF8Encoding]::new($false))
+        Set-Content $raw 'raw'; Write-NormalizedResult $normalized $project 'ANALYSIS-001' 'thread-1' $dispatchId 'result-1'
         Invoke-Manager @('-Action','record-result','-ProjectPath',$project,'-TaskId','ANALYSIS-001','-DispatchId',$dispatchId,'-ThreadId','thread-1','-ResultMessageId','result-1','-Cursor','cursor-result-1','-RawResultPath',$raw) | Should Be 0
-        Invoke-Manager @('-Action','transition','-ProjectPath',$project,'-TaskId','ANALYSIS-001','-ToStatus','completed','-Reason','verified','-RawResultPath',$raw,'-NormalizedResultPath',$normalized,'-Verified') | Should Be 0
+        Invoke-Manager @('-Action','verify-result','-ProjectPath',$project,'-TaskId','ANALYSIS-001','-NormalizedResultPath',$normalized) | Should Be 0
+        Invoke-Manager @('-Action','transition','-ProjectPath',$project,'-TaskId','ANALYSIS-001','-ToStatus','completed','-Reason','verified') | Should Be 0
         $tasks = @(Get-Content (Join-Path $project '.codex-orchestrator\tasks.json') -Raw | ConvertFrom-Json | ForEach-Object { $_ })
         $tasks[0].verified | Should Be $true
+        $tasks[0].normalized_result_sha256.Length | Should Be 64
+        $tasks[0].verification_receipt_sha256.Length | Should Be 64
+        Test-Path $tasks[0].verification_receipt_path | Should Be $true
+        Invoke-Manager @('-Action','audit','-ProjectPath',$project) | Should Be 0
         $events = @(Get-Content (Join-Path $project '.codex-orchestrator\events.jsonl') | ForEach-Object { $_ | ConvertFrom-Json })
         for ($i=0; $i -lt $events.Count; $i++) { $events[$i].sequence | Should Be ($i + 1) }
+        Add-Content $normalized 'tampered'
+        Invoke-Manager @('-Action','audit','-ProjectPath',$project) | Should Be 1
     }
 
     It 'rejects completion without both evidence files' {
@@ -105,7 +123,7 @@ Describe 'manage-workflow lifecycle' {
         $dispatchId = Start-Task $project 'ANALYSIS-001'
         $raw = Join-Path $project 'raw.md'; Set-Content $raw 'raw'
         Invoke-Manager @('-Action','record-result','-ProjectPath',$project,'-TaskId','ANALYSIS-001','-DispatchId',$dispatchId,'-ThreadId','thread-1','-ResultMessageId','result-1','-RawResultPath',$raw) | Should Be 0
-        Invoke-Manager @('-Action','transition','-ProjectPath',$project,'-TaskId','ANALYSIS-001','-ToStatus','completed','-Reason','missing evidence','-Verified') | Should Be 1
+        Invoke-Manager @('-Action','transition','-ProjectPath',$project,'-TaskId','ANALYSIS-001','-ToStatus','completed','-Reason','missing evidence') | Should Be 1
     }
 
     It 'upgrades v0.1 state defaults on the next successful mutation' {
@@ -115,7 +133,7 @@ Describe 'manage-workflow lifecycle' {
         Set-Content (Join-Path $state 'tasks.json') '[]'
         Invoke-Manager @('-Action','register','-ProjectPath',$project,'-TaskId','ANALYSIS-001','-ThreadId','thread-1','-Role','analyst','-Objective','analyze') | Should Be 0
         $workflow = Get-Content (Join-Path $state 'workflow.json') -Raw | ConvertFrom-Json
-        $workflow.state_version | Should Be 5
+        $workflow.state_version | Should Be 6
         $workflow.event_sequence | Should Be 1
     }
 
@@ -126,8 +144,45 @@ Describe 'manage-workflow lifecycle' {
         Set-Content (Join-Path $state 'tasks.json') '[]'
         Invoke-Manager @('-Action','register','-ProjectPath',$project,'-TaskId','ANALYSIS-001','-ThreadId','thread-1','-Role','analyst','-Objective','analyze') | Should Be 0
         $workflow = Get-Content (Join-Path $state 'workflow.json') -Raw | ConvertFrom-Json
-        $workflow.state_version | Should Be 5
+        $workflow.state_version | Should Be 6
         (Get-Task $project 'ANALYSIS-001').delivery_status | Should Be 'not-prepared'
+    }
+
+    It 'upgrades v0.5 task verification defaults on the next legal mutation' {
+        Invoke-Manager @('-Action','initialize','-ProjectPath',$project,'-WorkflowId','WF-001') | Should Be 0
+        Invoke-Manager @('-Action','register','-ProjectPath',$project,'-TaskId','ANALYSIS-001','-ThreadId','thread-1','-Role','analyst','-Objective','analyze') | Should Be 0
+        $state=Join-Path $project '.codex-orchestrator'
+        $workflow=Get-Content (Join-Path $state 'workflow.json') -Raw|ConvertFrom-Json;$workflow.state_version=5;$workflow|ConvertTo-Json -Depth 20|Set-Content (Join-Path $state 'workflow.json')
+        $tasks=@(Get-Content (Join-Path $state 'tasks.json') -Raw|ConvertFrom-Json|ForEach-Object{$_})
+        foreach($name in @('normalized_result_sha256','verification_receipt_path','verification_receipt_sha256','verified_at')){$tasks[0].PSObject.Properties.Remove($name)}
+        $tasks|ConvertTo-Json -Depth 20|Set-Content (Join-Path $state 'tasks.json')
+        Invoke-Manager @('-Action','transition','-ProjectPath',$project,'-TaskId','ANALYSIS-001','-ToStatus','awaiting_approval','-Reason','upgrade') | Should Be 0
+        (Get-Content (Join-Path $state 'workflow.json') -Raw|ConvertFrom-Json).state_version | Should Be 6
+        (Get-Task $project 'ANALYSIS-001').PSObject.Properties.Name -contains 'verification_receipt_path' | Should Be $true
+    }
+
+    It 'keeps legacy completion history without trusting its old self-verified flag' {
+        Invoke-Manager @('-Action','initialize','-ProjectPath',$project,'-WorkflowId','WF-001') | Should Be 0
+        Invoke-Manager @('-Action','register','-ProjectPath',$project,'-TaskId','ANALYSIS-001','-ThreadId','thread-1','-Role','analyst','-Objective','old analysis') | Should Be 0
+        $state=Join-Path $project '.codex-orchestrator'
+        $workflow=Get-Content (Join-Path $state 'workflow.json') -Raw|ConvertFrom-Json;$workflow.state_version=5;$workflow|ConvertTo-Json -Depth 20|Set-Content (Join-Path $state 'workflow.json')
+        $tasks=@(Get-Content (Join-Path $state 'tasks.json') -Raw|ConvertFrom-Json|ForEach-Object{$_});$tasks[0].status='completed';$tasks[0].verified=$true
+        foreach($name in @('normalized_result_sha256','verification_receipt_path','verification_receipt_sha256','verification_status','verified_at')){$tasks[0].PSObject.Properties.Remove($name)}
+        $tasks|ConvertTo-Json -Depth 20|Set-Content (Join-Path $state 'tasks.json')
+        Invoke-Manager @('-Action','register','-ProjectPath',$project,'-TaskId','ANALYSIS-002','-ThreadId','thread-2','-Role','analyst','-Objective','new analysis') | Should Be 0
+        $legacy=Get-Task $project 'ANALYSIS-001';$legacy.status|Should Be 'completed';$legacy.verified|Should Be $false;$legacy.verification_status|Should Be 'legacy-unverified'
+    }
+
+    It 'rejects incomplete normalized results and the legacy self-verified completion switch' {
+        Invoke-Manager @('-Action','initialize','-ProjectPath',$project,'-WorkflowId','WF-001') | Should Be 0
+        Invoke-Manager @('-Action','register','-ProjectPath',$project,'-TaskId','ANALYSIS-001','-ThreadId','thread-1','-Role','analyst','-Objective','analyze') | Should Be 0
+        foreach($state in @('awaiting_approval','approved')){Invoke-Manager @('-Action','transition','-ProjectPath',$project,'-TaskId','ANALYSIS-001','-ToStatus',$state,'-Reason','advance')|Should Be 0}
+        $dispatchId=Start-Task $project 'ANALYSIS-001';$raw=Join-Path $project 'raw.md';Set-Content $raw 'raw'
+        Invoke-Manager @('-Action','record-result','-ProjectPath',$project,'-TaskId','ANALYSIS-001','-DispatchId',$dispatchId,'-ThreadId','thread-1','-ResultMessageId','result-1','-RawResultPath',$raw)|Should Be 0
+        $incomplete=Join-Path $project 'incomplete.json';Set-Content $incomplete '{"task_id":"ANALYSIS-001"}'
+        Invoke-Manager @('-Action','verify-result','-ProjectPath',$project,'-TaskId','ANALYSIS-001','-NormalizedResultPath',$incomplete)|Should Be 1
+        Invoke-Manager @('-Action','transition','-ProjectPath',$project,'-TaskId','ANALYSIS-001','-ToStatus','completed','-Reason','legacy','-RawResultPath',$raw,'-NormalizedResultPath',$incomplete,'-Verified')|Should Be 1
+        $task=Get-Task $project 'ANALYSIS-001';$task.status|Should Be 'verifying';$task.verified|Should Be $false
     }
 
     It 'prepares one immutable dispatch envelope and rejects duplicate preparation' {
@@ -160,8 +215,9 @@ Describe 'manage-workflow lifecycle' {
         $raw = Join-Path $project 'raw.md'; Set-Content $raw 'raw'
         Invoke-Manager @('-Action','record-result','-ProjectPath',$project,'-TaskId','ANALYSIS-001','-DispatchId',$dispatchId,'-ThreadId','thread-1','-ResultMessageId','result-1','-RawResultPath',$raw) | Should Be 0
         $normalized = Join-Path $project 'result.json'
-        [IO.File]::WriteAllText($normalized,([ordered]@{task_id='ANALYSIS-001';thread_id='thread-1';dispatch_id='old-dispatch'}|ConvertTo-Json),[Text.UTF8Encoding]::new($false))
-        Invoke-Manager @('-Action','transition','-ProjectPath',$project,'-TaskId','ANALYSIS-001','-ToStatus','completed','-Reason','verify','-RawResultPath',$raw,'-NormalizedResultPath',$normalized,'-Verified') | Should Be 1
+        Write-NormalizedResult $normalized $project 'ANALYSIS-001' 'thread-1' 'old-dispatch' 'result-1'
+        Invoke-Manager @('-Action','verify-result','-ProjectPath',$project,'-TaskId','ANALYSIS-001','-NormalizedResultPath',$normalized) | Should Be 1
+        Invoke-Manager @('-Action','transition','-ProjectPath',$project,'-TaskId','ANALYSIS-001','-ToStatus','completed','-Reason','verify') | Should Be 1
         (Get-Task $project 'ANALYSIS-001').status | Should Be 'verifying'
     }
 
@@ -216,9 +272,10 @@ Describe 'manage-workflow lifecycle' {
             $dispatchId = Start-Task $project $taskId
             $threadId = (Get-Task $project $taskId).thread_id
             $raw = Join-Path $project "$taskId.raw.md"; $normalized = Join-Path $project "$taskId.result.json"
-            Set-Content $raw 'raw'; [IO.File]::WriteAllText($normalized,([ordered]@{task_id=$taskId;thread_id=$threadId;dispatch_id=$dispatchId}|ConvertTo-Json),[Text.UTF8Encoding]::new($false))
+            Set-Content $raw 'raw'; Write-NormalizedResult $normalized $project $taskId $threadId $dispatchId "result-$taskId"
             Invoke-Manager @('-Action','record-result','-ProjectPath',$project,'-TaskId',$taskId,'-DispatchId',$dispatchId,'-ThreadId',$threadId,'-ResultMessageId',"result-$taskId",'-RawResultPath',$raw) | Should Be 0
-            Invoke-Manager @('-Action','transition','-ProjectPath',$project,'-TaskId',$taskId,'-ToStatus','completed','-Reason','verified','-RawResultPath',$raw,'-NormalizedResultPath',$normalized,'-Verified') | Should Be 0
+            Invoke-Manager @('-Action','verify-result','-ProjectPath',$project,'-TaskId',$taskId,'-NormalizedResultPath',$normalized) | Should Be 0
+            Invoke-Manager @('-Action','transition','-ProjectPath',$project,'-TaskId',$taskId,'-ToStatus','completed','-Reason','verified') | Should Be 0
         }
         Invoke-Manager @('-Action','audit','-ProjectPath',$project) | Should Be 0
         $tasks = @(Get-Content (Join-Path $project '.codex-orchestrator\tasks.json') -Raw | ConvertFrom-Json | ForEach-Object { $_ })

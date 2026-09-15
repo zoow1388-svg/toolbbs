@@ -1,0 +1,14 @@
+{
+  "workflow_id": "WF-001",
+  "task_id": "ANALYSIS-001",
+  "dispatch_id": "ANALYSIS-001-example",
+  "thread_id": "example-thread",
+  "result_message_id": "example-item",
+  "raw_result_path": "D:\\example-project\\.codex-orchestrator\\results\\ANALYSIS-001.raw.md",
+  "raw_result_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "normalized_result_path": "D:\\example-project\\.codex-orchestrator\\results\\ANALYSIS-001.json",
+  "normalized_result_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "validator": "validate-result.ps1",
+  "validation_output": ["VALID: task=ANALYSIS-001; revision=unborn"],
+  "verified_at": "2026-09-15T00:00:00+08:00"
+}

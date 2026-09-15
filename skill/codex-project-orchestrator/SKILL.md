@@ -20,10 +20,11 @@ Coordinate Codex tasks through supported task tools. Never use window titles, mo
 9. Save each raw `wait_threads` response, convert it with `import-wait-snapshot.ps1`, and record it with `record-wait`. A wait preview may be truncated and is never the authoritative result.
 10. When the snapshot identifies a completed turn and final item, save a fresh `read_thread` response and use `extract-thread-result.ps1` with those exact IDs. Record the extracted result with the matching task ID, dispatch ID, thread ID, item ID, and cursor. Reject old or mismatched results by following [task-protocol.md](references/task-protocol.md).
 11. Preserve the extracted report unchanged, then normalize it into JSON by following [result-normalization.md](references/result-normalization.md). Never ask the executing task to invent JSON syntax or silently fill missing facts.
-12. Run the manager `audit` action, validate normalized results with JSON Schema and `scripts/validate-result.ps1`, then generate the user-facing UTF-8 Markdown with `scripts/render-result.ps1`. Never expose raw machine JSON as the final user report.
-13. Independently verify Git revision, changed files, commands, tests, and artifacts. A task saying "complete" is not proof.
-14. Advance through analysis, implementation, test, and review gates. Stop on missing evidence, stale results, conflicts, scope expansion, or new authorization requirements.
-15. Produce a truthful delivery report. Mark unexecuted checks as `未执行`.
+12. Run `verify-result` with the normalized result. This invokes the deterministic validator with the registered identities and creates an immutable verification receipt; never use `transition -Verified` or edit a receipt.
+13. Run the manager `audit` action, then generate the user-facing UTF-8 Markdown with `scripts/render-result.ps1`. Never expose raw machine JSON as the final user report.
+14. Independently verify Git revision, changed files, commands, tests, and artifacts. A task saying "complete" is not proof.
+15. Advance through analysis, implementation, test, and review gates. Complete a task only after `verify-result` succeeds. Stop on missing evidence, stale results, conflicts, scope expansion, or new authorization requirements.
+16. Produce a truthful delivery report. Mark unexecuted checks as `未执行`.
 
 ## Task tools
 

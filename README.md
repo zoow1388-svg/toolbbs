@@ -75,3 +75,16 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File '.\skill\codex-project-o
 ```
 
 随后用 `record-result` 登记该完整原文。快照 revision 重复、身份不符、证据哈希变化或完整 item 缺失都会关闭门禁。
+
+## v0.6 可信结果验证
+
+规范化结果完成后，通过状态管理器执行真实验证并生成不可变回执：
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File '.\skill\codex-project-orchestrator\scripts\manage-workflow.ps1' -Action verify-result -ProjectPath 'D:\目标项目' -TaskId 'ANALYSIS-001' -NormalizedResultPath 'D:\目标项目\.codex-orchestrator\results\ANALYSIS-001.json'
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File '.\skill\codex-project-orchestrator\scripts\manage-workflow.ps1' -Action transition -ProjectPath 'D:\目标项目' -TaskId 'ANALYSIS-001' -ToStatus completed -Reason '可信验证通过'
+```
+
+旧的 `transition -Verified` 已被拒绝，不能由调用者直接声明验证成功。`audit` 会检查原始结果、规范化结果和验证回执，验证后修改任一证据都会失败。
+
+升级时，没有新回执的旧版完成任务会保留历史状态，但标记为 `legacy-unverified`，不能作为后续任务的可信依赖。

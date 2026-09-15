@@ -54,6 +54,7 @@ function Read-StateJson {
 function Add-Defaults {
     param($Workflow,[object[]]$Tasks)
     if ($Workflow.PSObject.Properties.Match('state_version').Count -eq 0) { Add-Member -InputObject $Workflow -NotePropertyName state_version -NotePropertyValue 2 }
+    $sourceStateVersion=[int]$Workflow.state_version
     if ($Workflow.PSObject.Properties.Match('event_sequence').Count -eq 0) { Add-Member -InputObject $Workflow -NotePropertyName event_sequence -NotePropertyValue 0 }
     if ($Workflow.PSObject.Properties.Match('current_stage').Count -eq 0) { Add-Member -InputObject $Workflow -NotePropertyName current_stage -NotePropertyValue 'analysis' }
     foreach ($task in $Tasks) {
@@ -69,13 +70,17 @@ function Add-Defaults {
         foreach ($name in @('send_receipt_path','send_receipt_sha256','observation_path','observation_sha256','observed_status','observed_at')) {
             if ($task.PSObject.Properties.Match($name).Count -eq 0) { Add-Member -InputObject $task -NotePropertyName $name -NotePropertyValue $null }
         }
-        foreach ($name in @('wait_snapshot_path','wait_snapshot_sha256','latest_turn_id','latest_item_id','raw_result_sha256')) {
+        foreach ($name in @('wait_snapshot_path','wait_snapshot_sha256','latest_turn_id','latest_item_id','raw_result_sha256','normalized_result_sha256','verification_receipt_path','verification_receipt_sha256','verified_at')) {
             if ($task.PSObject.Properties.Match($name).Count -eq 0) { Add-Member -InputObject $task -NotePropertyName $name -NotePropertyValue $null }
         }
         if($task.PSObject.Properties.Match('wait_revision').Count -eq 0){Add-Member -InputObject $task -NotePropertyName wait_revision -NotePropertyValue $null}
         if($task.PSObject.Properties.Match('result_truncated').Count -eq 0){Add-Member -InputObject $task -NotePropertyName result_truncated -NotePropertyValue $false}
+        if($task.PSObject.Properties.Match('verification_status').Count -eq 0){
+            $verificationStatus=$(if($sourceStateVersion -lt 6 -and $task.status -eq 'completed' -and $task.verified){$task.verified=$false;'legacy-unverified'}elseif($task.verified -and -not [string]::IsNullOrWhiteSpace($task.verification_receipt_path)){'trusted'}else{'unverified'})
+            Add-Member -InputObject $task -NotePropertyName verification_status -NotePropertyValue $verificationStatus
+        }
     }
-    if ([int]$Workflow.state_version -lt 5) { $Workflow.state_version = 5 }
+    if ([int]$Workflow.state_version -lt 6) { $Workflow.state_version = 6 }
 }
 
 function Write-Event {
@@ -94,7 +99,7 @@ function Initialize-WorkflowState {
         $workflowPath = Join-Path $state 'workflow.json'
         if (Test-Path -LiteralPath $workflowPath) { throw 'Workflow already exists.' }
         $now = Get-UtcTimestamp
-        $workflow = [ordered]@{ workflow_id=$WorkflowId; project_path=$resolved; state_version=5; status='draft'; current_stage='analysis'; authorization='read-only'; event_sequence=0; created_at=$now; updated_at=$now }
+        $workflow = [ordered]@{ workflow_id=$WorkflowId; project_path=$resolved; state_version=6; status='draft'; current_stage='analysis'; authorization='read-only'; event_sequence=0; created_at=$now; updated_at=$now }
         $tasks = @()
         Write-Event $state $workflow 'workflow_initialized' $null $null 'draft' 'initialization'
         Write-JsonAtomic $workflow $workflowPath
@@ -120,7 +125,7 @@ function Register-WorkflowTask {
         $activeFiles = @($tasks | Where-Object { $_.role -eq 'developer' -and $_.status -notin $script:TerminalStates } | ForEach-Object { $_.allowed_files })
         $overlap = @($AllowedFiles | Where-Object { $_ -in $activeFiles })
         if ($Role -eq 'developer' -and $overlap.Count -gt 0) { throw "File ownership conflict: $($overlap -join ', ')" }
-        $task = [ordered]@{ task_id=$TaskId; thread_id=$ThreadId; host_id=$HostId; role=$Role; status='draft'; depends_on=@($DependsOn); project_path=$workflow.project_path; base_revision=$BaseRevision; allowed_files=@($AllowedFiles); objective=$Objective; authorization=$Authorization; repair_count=0; dispatch_count=0; dispatch_id=$null; delivery_status='not-prepared'; dispatch_path=$null; sent_message_id=$null; send_receipt_path=$null; send_receipt_sha256=$null; result_message_id=$null; read_cursor=$null; wait_revision=$null; wait_snapshot_path=$null; wait_snapshot_sha256=$null; latest_turn_id=$null; latest_item_id=$null; result_truncated=$false; observation_path=$null; observation_sha256=$null; observed_status=$null; observed_at=$null; dispatched_at=$null; acknowledged_at=$null; result_received_at=$null; raw_result_path=$null; raw_result_sha256=$null; normalized_result_path=$null; verified=$false; updated_at=(Get-UtcTimestamp) }
+        $task = [ordered]@{ task_id=$TaskId; thread_id=$ThreadId; host_id=$HostId; role=$Role; status='draft'; depends_on=@($DependsOn); project_path=$workflow.project_path; base_revision=$BaseRevision; allowed_files=@($AllowedFiles); objective=$Objective; authorization=$Authorization; repair_count=0; dispatch_count=0; dispatch_id=$null; delivery_status='not-prepared'; dispatch_path=$null; sent_message_id=$null; send_receipt_path=$null; send_receipt_sha256=$null; result_message_id=$null; read_cursor=$null; wait_revision=$null; wait_snapshot_path=$null; wait_snapshot_sha256=$null; latest_turn_id=$null; latest_item_id=$null; result_truncated=$false; observation_path=$null; observation_sha256=$null; observed_status=$null; observed_at=$null; dispatched_at=$null; acknowledged_at=$null; result_received_at=$null; raw_result_path=$null; raw_result_sha256=$null; normalized_result_path=$null; normalized_result_sha256=$null; verification_receipt_path=$null; verification_receipt_sha256=$null; verification_status='unverified'; verified_at=$null; verified=$false; updated_at=(Get-UtcTimestamp) }
         $tasks += [pscustomobject]$task
         Write-Event $state $workflow 'task_registered' $TaskId $null 'draft' 'registration'
         $workflow.updated_at = Get-UtcTimestamp; Write-JsonAtomic $workflow $workflowPath; Write-JsonAtomic $tasks $tasksPath
@@ -243,6 +248,49 @@ function Receive-WorkflowResult {
     }
 }
 
+function Confirm-WorkflowResultVerified {
+    param([string]$ProjectPath,[string]$TaskId,[string]$NormalizedResultPath)
+    $resolvedProject=[IO.Path]::GetFullPath($ProjectPath)
+    $state=Join-Path $resolvedProject '.codex-orchestrator'
+    Invoke-WithStateLock $state {
+        $workflowPath=Join-Path $state 'workflow.json';$tasksPath=Join-Path $state 'tasks.json'
+        $workflow=Read-StateJson $workflowPath;$tasks=@(Read-StateJson $tasksPath|ForEach-Object{$_});Add-Defaults $workflow $tasks
+        $task=@($tasks|Where-Object{$_.task_id -eq $TaskId});if($task.Count -ne 1){throw "Task not found: $TaskId"};$task=$task[0]
+        if($task.status -ne 'verifying' -or $task.delivery_status -ne 'result_received'){throw 'Task is not ready for result verification.'}
+        if($task.verified){throw 'Task result was already verified.'}
+        if(-not(Test-Path -LiteralPath $NormalizedResultPath)){throw 'Normalized result file not found.'}
+        if(-not(Test-Path -LiteralPath $task.raw_result_path)){throw 'Raw result file not found.'}
+        $rawHash=(Get-FileHash -LiteralPath $task.raw_result_path -Algorithm SHA256).Hash.ToLowerInvariant()
+        if($rawHash -ne $task.raw_result_sha256){throw 'Raw result hash mismatch before verification.'}
+        $resolvedNormalized=[IO.Path]::GetFullPath($NormalizedResultPath)
+        $validator=Join-Path $PSScriptRoot 'validate-result.ps1'
+        $powershellPath=(Get-Process -Id $PID).Path
+        $validationOutput=@(& $powershellPath -NoProfile -ExecutionPolicy Bypass -File $validator -ResultPath $resolvedNormalized -ProjectPath $resolvedProject -ExpectedTaskId $task.task_id -ExpectedDispatchId $task.dispatch_id -ExpectedThreadId $task.thread_id 2>&1)
+        if($LASTEXITCODE -ne 0){throw "Normalized result validation failed: $($validationOutput -join ' | ')"}
+        $normalized=Read-StateJson $resolvedNormalized
+        if($normalized.host_id -ne $task.host_id){throw 'Normalized result host does not match the assigned task.'}
+        if($normalized.normalization.source_message_id -ne $task.result_message_id){throw 'Normalized result source message does not match the received result item.'}
+        if($normalized.normalization.source_thread_id -ne $task.thread_id){throw 'Normalized result source thread does not match the assigned task.'}
+        $normalizedHash=(Get-FileHash -LiteralPath $resolvedNormalized -Algorithm SHA256).Hash.ToLowerInvariant()
+        $verifiedAt=Get-UtcTimestamp
+        $receipt=[ordered]@{
+            workflow_id=$workflow.workflow_id;task_id=$task.task_id;dispatch_id=$task.dispatch_id;thread_id=$task.thread_id
+            result_message_id=$task.result_message_id;raw_result_path=$task.raw_result_path;raw_result_sha256=$rawHash
+            normalized_result_path=$resolvedNormalized;normalized_result_sha256=$normalizedHash
+            validator='validate-result.ps1';validation_output=@($validationOutput|ForEach-Object{[string]$_});verified_at=$verifiedAt
+        }
+        $receiptDirectory=Join-Path $state 'verifications';$receiptPath=Join-Path $receiptDirectory "$($task.dispatch_id).json"
+        if(Test-Path -LiteralPath $receiptPath){throw 'Verification receipt already exists and will not be overwritten.'}
+        Write-JsonAtomic $receipt $receiptPath
+        $task.normalized_result_path=$resolvedNormalized;$task.normalized_result_sha256=$normalizedHash
+        $task.verification_receipt_path=[IO.Path]::GetFullPath($receiptPath);$task.verification_receipt_sha256=(Get-FileHash -LiteralPath $receiptPath -Algorithm SHA256).Hash.ToLowerInvariant()
+        $task.verified=$true;$task.verification_status='trusted';$task.verified_at=$verifiedAt;$task.updated_at=Get-UtcTimestamp
+        Write-Event $state $workflow 'result_verified' $TaskId 'result_received' 'verified' $task.verification_receipt_sha256
+        $workflow.updated_at=Get-UtcTimestamp;Write-JsonAtomic $workflow $workflowPath;Write-JsonAtomic $tasks $tasksPath
+        [pscustomobject]$receipt
+    }
+}
+
 function Get-WorkflowReconciliation {
     param([string]$ProjectPath,[string]$TaskId)
     $state=Get-WorkflowState -ProjectPath $ProjectPath
@@ -251,7 +299,7 @@ function Get-WorkflowReconciliation {
         'approved|prepared' {'send_prepared_dispatch'}
         'dispatched|sent' {'wait_for_acknowledgement'}
         'running|acknowledged' {if(-not [string]::IsNullOrWhiteSpace($task.latest_turn_id) -and -not [string]::IsNullOrWhiteSpace($task.latest_item_id)){'fetch_full_result'}else{'wait_for_result'}}
-        'verifying|result_received' {'validate_received_result'}
+        'verifying|result_received' {if($task.verified){'complete_verified_task'}else{'validate_received_result'}}
         'completed|result_received' {'complete'}
         default {'manual_review'}
     }
@@ -259,7 +307,7 @@ function Get-WorkflowReconciliation {
 }
 
 function Set-WorkflowTaskState {
-    param([string]$ProjectPath,[string]$TaskId,[string]$ToStatus,[string]$Reason,[string]$RawResultPath,[string]$NormalizedResultPath,[switch]$Verified)
+    param([string]$ProjectPath,[string]$TaskId,[string]$ToStatus,[string]$Reason)
     $state = Join-Path ([System.IO.Path]::GetFullPath($ProjectPath)) '.codex-orchestrator'
     Invoke-WithStateLock $state {
         $workflowPath = Join-Path $state 'workflow.json'; $tasksPath = Join-Path $state 'tasks.json'
@@ -276,11 +324,9 @@ function Set-WorkflowTaskState {
             $workflow.current_stage = $stageByRole[[string]$task.role]; $workflow.status = 'running'
         }
         if ($ToStatus -eq 'completed') {
-            if (-not $Verified -or [string]::IsNullOrWhiteSpace($RawResultPath) -or [string]::IsNullOrWhiteSpace($NormalizedResultPath)) { throw 'Completion requires verified raw and normalized results.' }
-            if (-not (Test-Path -LiteralPath $RawResultPath) -or -not (Test-Path -LiteralPath $NormalizedResultPath)) { throw 'Result evidence file not found.' }
-            $normalized = Read-StateJson $NormalizedResultPath
-            if ($normalized.task_id -ne $task.task_id -or $normalized.thread_id -ne $task.thread_id -or $normalized.dispatch_id -ne $task.dispatch_id) { throw 'Normalized result identity does not match task, thread, and dispatch.' }
-            $task.raw_result_path = [System.IO.Path]::GetFullPath($RawResultPath); $task.normalized_result_path = [System.IO.Path]::GetFullPath($NormalizedResultPath); $task.verified = $true
+            if(-not $task.verified -or $task.verification_status -ne 'trusted' -or [string]::IsNullOrWhiteSpace($task.verification_receipt_path) -or [string]::IsNullOrWhiteSpace($task.verification_receipt_sha256)){throw 'Completion requires a trusted verification receipt.'}
+            if(-not(Test-Path -LiteralPath $task.verification_receipt_path) -or (Get-FileHash -LiteralPath $task.verification_receipt_path -Algorithm SHA256).Hash.ToLowerInvariant() -ne $task.verification_receipt_sha256){throw 'Verification receipt is missing or changed.'}
+            if(-not(Test-Path -LiteralPath $task.normalized_result_path) -or (Get-FileHash -LiteralPath $task.normalized_result_path -Algorithm SHA256).Hash.ToLowerInvariant() -ne $task.normalized_result_sha256){throw 'Normalized result is missing or changed.'}
         }
         $task.status = $ToStatus; $task.updated_at = Get-UtcTimestamp
         Write-Event $state $workflow 'task_transitioned' $TaskId $from $ToStatus $Reason
@@ -318,6 +364,13 @@ function Test-WorkflowStateIntegrity {
         if ($task.delivery_status -in @('acknowledged','result_received') -and [string]::IsNullOrWhiteSpace($task.acknowledged_at)) { throw "Task acknowledgement evidence is incomplete: $($task.task_id)" }
         if ($task.delivery_status -eq 'result_received' -and ([string]::IsNullOrWhiteSpace($task.result_message_id) -or [string]::IsNullOrWhiteSpace($task.result_received_at) -or -not (Test-Path -LiteralPath $task.raw_result_path))) { throw "Task result evidence is incomplete: $($task.task_id)" }
         if(-not [string]::IsNullOrWhiteSpace($task.raw_result_path) -and ((Get-FileHash -LiteralPath $task.raw_result_path -Algorithm SHA256).Hash.ToLowerInvariant() -ne $task.raw_result_sha256)){throw "Task raw result hash mismatch: $($task.task_id)"}
+        if($task.verified -and $task.verification_status -ne 'trusted'){throw "Task trusted verification status is inconsistent: $($task.task_id)"}
+        if($task.verified){
+            if([string]::IsNullOrWhiteSpace($task.verified_at) -or -not(Test-Path -LiteralPath $task.normalized_result_path) -or (Get-FileHash -LiteralPath $task.normalized_result_path -Algorithm SHA256).Hash.ToLowerInvariant() -ne $task.normalized_result_sha256){throw "Task normalized result evidence is incomplete: $($task.task_id)"}
+            if(-not(Test-Path -LiteralPath $task.verification_receipt_path) -or (Get-FileHash -LiteralPath $task.verification_receipt_path -Algorithm SHA256).Hash.ToLowerInvariant() -ne $task.verification_receipt_sha256){throw "Task verification receipt mismatch: $($task.task_id)"}
+            $receipt=Read-StateJson $task.verification_receipt_path
+            if($receipt.task_id -ne $task.task_id -or $receipt.dispatch_id -ne $task.dispatch_id -or $receipt.thread_id -ne $task.thread_id -or $receipt.result_message_id -ne $task.result_message_id -or $receipt.raw_result_sha256 -ne $task.raw_result_sha256 -or $receipt.normalized_result_sha256 -ne $task.normalized_result_sha256){throw "Task verification receipt identity mismatch: $($task.task_id)"}
+        }
     }
     $leftovers = @(Get-ChildItem -LiteralPath $state -File | Where-Object { $_.Name -match '\.(tmp|bak)\.' })
     if ($leftovers.Count -gt 0) { throw 'Interrupted atomic-write artifact detected.' }
@@ -330,4 +383,4 @@ function Get-WorkflowState {
     [ordered]@{ workflow=(Read-StateJson (Join-Path $state 'workflow.json')); tasks=@(Read-StateJson (Join-Path $state 'tasks.json') | ForEach-Object { $_ }) }
 }
 
-Export-ModuleMember -Function Initialize-WorkflowState,Register-WorkflowTask,Set-WorkflowTaskState,New-WorkflowDispatch,Confirm-WorkflowDispatchSent,Confirm-WorkflowAcknowledged,Receive-WorkflowResult,Record-WorkflowThreadObservation,Record-WorkflowWaitSnapshot,Get-WorkflowReconciliation,Get-WorkflowState,Test-WorkflowStateIntegrity
+Export-ModuleMember -Function Initialize-WorkflowState,Register-WorkflowTask,Set-WorkflowTaskState,New-WorkflowDispatch,Confirm-WorkflowDispatchSent,Confirm-WorkflowAcknowledged,Receive-WorkflowResult,Confirm-WorkflowResultVerified,Record-WorkflowThreadObservation,Record-WorkflowWaitSnapshot,Get-WorkflowReconciliation,Get-WorkflowState,Test-WorkflowStateIntegrity

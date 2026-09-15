@@ -62,6 +62,7 @@ foreach ($task in $tasks) {
     }
     if ($task.status -eq 'completed' -and $task.PSObject.Properties.Match('verified').Count -gt 0) {
         if (-not $task.verified -or [string]::IsNullOrWhiteSpace($task.raw_result_path) -or [string]::IsNullOrWhiteSpace($task.normalized_result_path)) { Add-ValidationError "task[$($task.task_id)] completed without verified evidence" }
+        if ([int]$workflow.state_version -ge 6 -and ($task.verification_status -ne 'trusted' -or [string]::IsNullOrWhiteSpace($task.verification_receipt_path) -or [string]::IsNullOrWhiteSpace($task.verification_receipt_sha256))) { Add-ValidationError "task[$($task.task_id)] completed without trusted verification receipt" }
     }
 }
 

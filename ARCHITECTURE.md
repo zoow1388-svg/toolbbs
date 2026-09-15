@@ -61,3 +61,11 @@
 等待层只定位新 revision、完成 turn 和最终 item，不把可能截断的消息预览当作结果。`import-wait-snapshot.ps1` 将原始 `wait_threads` 响应转换为可审计快照；状态层要求 revision 严格递增，并保存快照与原始响应哈希。
 
 完整结果必须来自新的 `read_thread` 原始响应。`extract-thread-result.ps1` 按等待快照中的 thread、turn 和 item 三重身份提取已完成的 `final_answer`，保留原文并计算 SHA-256。恢复决策在拿到精确结果身份后进入 `fetch_full_result`，完成提取后才进入既有规范化和验证链路。
+
+## v0.6 可信验证门禁
+
+任务不能再通过 `transition -Verified` 自报验证成功。`verify-result` 在状态锁内调用确定性验证器，核对任务、派发、线程、主机、来源消息、项目路径和 Git 修订，并为原始结果及规范化结果生成不可变验证回执。
+
+状态层保存规范化结果与回执的 SHA-256。只有持有有效回执的任务才能进入 `completed`，依赖任务也只接受这种可信完成状态。`audit` 会复核原始结果、规范化结果、回执哈希及相互身份，验证后的证据变化会关闭门禁。
+
+v0.5 及更早版本的历史完成任务若没有回执，升级时保留完成历史但标记为 `legacy-unverified`，并取消后续依赖放行资格。系统不会为旧结果伪造验证证据。
