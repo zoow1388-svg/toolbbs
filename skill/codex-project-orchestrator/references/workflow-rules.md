@@ -15,9 +15,26 @@
 - 修改任务的 `allowed_files` 不得相交；无法确定动态写入范围时串行执行。
 - 只读任务可并行，但不得读取或展示敏感数据。
 - 同一任务不得重复派发；派发时记录事件和时间戳。
+- 投递状态依次为 `not-prepared → prepared → sent → acknowledged → result_received`；每次派发使用唯一 `dispatch_id`。
+- 只有宿主任务工具返回成功回执后才能记录 `sent`；读取结果时保存游标，拒绝错误任务、窗口或派发编号。
+- 消息 ID 不是必需证据；无论宿主是否返回消息 ID，都必须保存原始发送回执并记录 SHA-256。
+- 每次 `list_threads`、`read_thread` 或 `wait_threads` 的关键观察应保存原始响应，通过 `record-observation` 核对任务、主机、项目路径和游标。
 - 最多等待八个任务；使用返回游标避免重复处理旧结果。
+- 使用 `manage-workflow.ps1` 执行初始化、登记、迁移、读取和审计；不得手改运行状态。
+- 合法主路径是 `draft → awaiting_approval → approved → dispatched → running → verifying → completed`。
+- 开发必须依赖分析，测试必须依赖开发，审查必须同时依赖开发和测试。
+- 标记完成必须同时提供原始结果、规范化结果，并设置已验证标志。
+- v0.3 不允许用通用状态迁移直接进入 `dispatched`，必须通过 `prepare-dispatch` 和 `record-sent`。
+- v0.6 不允许用 `transition -Verified` 自报结果可信。必须先调用 `verify-result`，由状态管理器运行验证器并保存不可变回执。
+- 派发必须保存各依赖的可信 `end_revision`；依赖修订必须唯一并等于接收任务的 `base_revision`。
+- 角色门禁分别要求 `plan_ready`、`implementation_complete`、`tests_executed` 和 `code_review_complete`。测试至少有一项通过检查，审查不得遗留发现。
+- 总控身份使用单调递增任期；接管必须匹配旧身份和旧任期，并在项目锁内一次完成。接管后所有旧动作计划失效。
+- 已派发任务的总控任期和回传目标不可变；只有接管后的新派发使用新总控身份。
+- 派发发送和回传 ACK 必须先登记外部动作意图。`prepared` 动作在恢复时视为可能已送达，禁止自动重试。
+- 只有匹配的 `completed` 外部动作才能写入 `record-sent` 或 `record-callback-ack`；确认未送达并保存证据后才能取消并重试。
+- 执行动作计划中的操作前必须认领动作执行租约。认领、续期、完成和失败都写入独立检查点；租约过期不得自动重做。
+- 只有证据化 `abandoned` 或显式 `retry_authorized` 才能产生同一逻辑动作的新尝试；`reconciled` 只记录已核实的既有结果，不伪造业务状态。
 
 ## 返修
 
-只有根因明确、范围不扩大并仍在原授权内时，允许一次定向返修。若错误增加、修改扩散、多个模块重复修补或测试互相破坏，立即停止并重新分析。
-
+只有根因明确、范围不扩大并仍在原授权内时，允许一次定向返修。返修使用新任务 ID 和 `repair_of`，并保持来源任务的角色、依赖及授权；文件范围只能保持或缩小。第二次返修、扩大范围、错误增加、多个模块重复修补或测试互相破坏时，立即停止并重新分析。

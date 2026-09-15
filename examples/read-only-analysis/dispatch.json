@@ -1,0 +1,24 @@
+{
+  "dispatch_id": "ANALYSIS-001-exampledispatch",
+  "workflow_id": "WF-EXAMPLE-001",
+  "controller_epoch": 1,
+  "task_id": "ANALYSIS-001",
+  "thread_id": "example-thread",
+  "host_id": "local",
+  "role": "analyst",
+  "repair_of": null,
+  "project_path": "D:\\example-project",
+  "base_revision": "unborn",
+  "objective": "只读分析项目结构",
+  "depends_on": [],
+  "dependency_revisions": [],
+  "allowed_files": [],
+  "authorization": "read-only",
+  "callback": {
+    "event_id": "ANALYSIS-001-exampledispatch:completion",
+    "target_thread_id": "controller-example",
+    "target_host_id": "local",
+    "status": "completed"
+  },
+  "created_at": "2026-09-15T00:00:30+08:00"
+}

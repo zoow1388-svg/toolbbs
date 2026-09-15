@@ -1,7 +1,8 @@
 {
-  "task_id": "ANALYSIS-001", "thread_id": "example-thread", "host_id": "local", "project_path": "D:\\example-project",
+  "task_id": "ANALYSIS-001", "dispatch_id": "ANALYSIS-001-exampledispatch", "thread_id": "example-thread", "host_id": "local", "project_path": "D:\\example-project",
   "base_revision": "unborn", "end_revision": "unborn", "summary": "只读分析示例", "preexisting_changes": [], "changed_files": [],
   "commands": [], "checks": [{"name": "项目结构读取", "status": "passed"}], "artifacts": [], "unexecuted": [],
   "blockers": [], "risks": [], "required_authorization": null, "created_at": "2026-09-15T00:01:00+08:00",
+  "stage_evidence": {"role": "analyst", "outcome": "passed", "inspected_revision": "unborn", "criteria": ["plan_ready"], "findings": []},
   "normalization": {"normalized_by": "controller", "source_thread_id": "example-thread", "source_message_id": "example-message", "source_format": "markdown", "decisions": []}
 }

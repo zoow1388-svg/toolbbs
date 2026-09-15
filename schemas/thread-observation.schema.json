@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "thread-observation.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["thread_id", "host_id", "project_path", "status", "cursor", "source", "observed_at", "raw_response_path", "raw_response_sha256"],
+  "properties": {
+    "thread_id": {"type": "string", "minLength": 1},
+    "host_id": {"type": "string", "minLength": 1},
+    "project_path": {"type": "string", "pattern": "^[A-Za-z]:\\\\"},
+    "status": {"enum": ["active", "idle", "completed", "needs_attention", "unavailable", "unknown"]},
+    "cursor": {"type": ["string", "null"]},
+    "source": {"enum": ["list_threads", "read_thread", "wait_threads"]},
+    "observed_at": {"type": "string", "format": "date-time"},
+    "raw_response_path": {"type": "string", "minLength": 1},
+    "raw_response_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"}
+  }
+}

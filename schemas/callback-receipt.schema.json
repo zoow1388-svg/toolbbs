@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "callback-receipt.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["type", "event_id", "workflow_id", "task_id", "dispatch_id", "source_thread_id", "source_host_id", "target_thread_id", "target_host_id", "status"],
+  "properties": {
+    "type": {"const": "completion_callback"},
+    "event_id": {"type": "string", "minLength": 1},
+    "workflow_id": {"type": "string", "minLength": 1},
+    "task_id": {"type": "string", "pattern": "^[A-Z]+-[0-9]{3,}$"},
+    "dispatch_id": {"type": "string", "minLength": 1},
+    "source_thread_id": {"type": "string", "minLength": 1},
+    "source_host_id": {"type": "string", "minLength": 1},
+    "target_thread_id": {"type": "string", "minLength": 1},
+    "target_host_id": {"type": "string", "minLength": 1},
+    "status": {"const": "completed"}
+  }
+}

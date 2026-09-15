@@ -1,0 +1,14 @@
+{
+  "timedOut": true,
+  "wake": null,
+  "polls": [{
+    "schemaVersion": 1,
+    "cursor": "cursor-001:11",
+    "revision": 11,
+    "changed": true,
+    "thread": {"id": "thread-001", "hostId": "local", "status": {"type": "active"}},
+    "latestTurn": {"id": "turn-001", "status": "inProgress", "error": null},
+    "latestAssistantMessageId": "item-commentary",
+    "latestAssistantMessage": {"id": "item-commentary", "turnId": "turn-001", "phase": "commentary", "text": "working"}
+  }]
+}

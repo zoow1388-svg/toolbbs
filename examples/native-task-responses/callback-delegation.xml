@@ -1,0 +1,4 @@
+<codex_delegation>
+  <source_thread_id>worker-thread</source_thread_id>
+  <input>{"type":"completion_callback","event_id":"ANALYSIS-001-exampledispatch:completion","workflow_id":"WF-EXAMPLE-001","task_id":"ANALYSIS-001","dispatch_id":"ANALYSIS-001-exampledispatch","source_thread_id":"worker-thread","source_host_id":"local","target_thread_id":"controller-thread","target_host_id":"local","status":"completed"}</input>
+</codex_delegation>

@@ -1,0 +1,12 @@
+{
+  "type": "completion_callback",
+  "event_id": "ANALYSIS-001-exampledispatch:completion",
+  "workflow_id": "WF-EXAMPLE-001",
+  "task_id": "ANALYSIS-001",
+  "dispatch_id": "ANALYSIS-001-exampledispatch",
+  "source_thread_id": "example-thread",
+  "source_host_id": "local",
+  "target_thread_id": "controller-example",
+  "target_host_id": "local",
+  "status": "completed"
+}

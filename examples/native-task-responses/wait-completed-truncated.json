@@ -1,0 +1,14 @@
+{
+  "timedOut": false,
+  "wake": {"reason": "turnCompleted", "turnId": "turn-001", "threadId": "thread-001", "hostId": "local"},
+  "polls": [{
+    "schemaVersion": 1,
+    "cursor": "cursor-001:12",
+    "revision": 12,
+    "changed": true,
+    "thread": {"id": "thread-001", "hostId": "local", "status": {"type": "idle"}},
+    "latestTurn": {"id": "turn-001", "status": "completed", "error": null},
+    "latestAssistantMessageId": "item-001",
+    "latestAssistantMessage": {"id": "item-001", "turnId": "turn-001", "phase": "final_answer", "text": "partial result", "truncated": true, "originalChars": 4096}
+  }]
+}

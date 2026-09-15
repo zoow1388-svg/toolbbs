@@ -1,0 +1,27 @@
+{
+  "schema_version": 5,
+  "workflow_id": "WF-READONLY-001",
+  "project_path": "D:\\example-project",
+  "controller_thread_id": "controller-example",
+  "controller_host_id": "local",
+  "controller_epoch": 1,
+  "based_on_event_sequence": 2,
+  "workflow_state_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "tasks_state_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "external_actions_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+  "action_executions_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+  "generated_at": "2026-09-15T00:00:00+08:00",
+  "actions": [{
+    "action_id": "WF-READONLY-001:2:request_authorization:ANALYSIS-001",
+    "type": "request_authorization",
+    "task_ids": ["ANALYSIS-001"],
+    "based_on_event_sequence": 2,
+    "operation": "request_user_authorization",
+    "parameters": {"task_id": "ANALYSIS-001", "current_status": "awaiting_approval", "requested_authorization": "read-only"},
+    "operation_sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    "evidence_required": ["explicit user approval"],
+    "state_changing": false,
+    "authorization_required": "explicit-user-approval",
+    "reason": "Task cannot advance without explicit approval."
+  }]
+}

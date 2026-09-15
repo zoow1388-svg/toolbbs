@@ -1,0 +1,10 @@
+{
+  "sequence": 1,
+  "workflow_id": "WF-READONLY-001",
+  "type": "workflow_initialized",
+  "task_id": null,
+  "from_status": null,
+  "to_status": "draft",
+  "reason": "initialization",
+  "created_at": "2026-09-15T00:00:00+08:00"
+}
