@@ -51,6 +51,19 @@ function Read-StateJson {
     Get-Content -LiteralPath $Path -Raw -Encoding UTF8 | ConvertFrom-Json
 }
 
+function Get-ObjectSha256($Value){
+    $json=$Value|ConvertTo-Json -Depth 20 -Compress
+    $bytes=[Text.UTF8Encoding]::new($false).GetBytes($json)
+    $sha=[Security.Cryptography.SHA256]::Create()
+    try{([BitConverter]::ToString($sha.ComputeHash($bytes))).Replace('-','').ToLowerInvariant()}finally{$sha.Dispose()}
+}
+
+function Read-ExternalActions([string]$StateDirectory){
+    $path=Join-Path $StateDirectory 'external-actions.json'
+    if(-not(Test-Path -LiteralPath $path)){return @()}
+    @(Read-StateJson $path|ForEach-Object{$_})
+}
+
 function Add-Defaults {
     param($Workflow,[object[]]$Tasks)
     if ($Workflow.PSObject.Properties.Match('state_version').Count -eq 0) { Add-Member -InputObject $Workflow -NotePropertyName state_version -NotePropertyValue 2 }
@@ -93,7 +106,7 @@ function Add-Defaults {
             Add-Member -InputObject $task -NotePropertyName verification_status -NotePropertyValue $verificationStatus
         }
     }
-    if ([int]$Workflow.state_version -lt 10) { $Workflow.state_version = 10 }
+    if ([int]$Workflow.state_version -lt 11) { $Workflow.state_version = 11 }
 }
 
 function Write-Event {
@@ -112,11 +125,78 @@ function Initialize-WorkflowState {
         $workflowPath = Join-Path $state 'workflow.json'
         if (Test-Path -LiteralPath $workflowPath) { throw 'Workflow already exists.' }
         $now = Get-UtcTimestamp
-        $workflow = [ordered]@{ workflow_id=$WorkflowId; project_path=$resolved; state_version=10; controller_thread_id=$(if([string]::IsNullOrWhiteSpace($ControllerThreadId)){$null}else{$ControllerThreadId}); controller_host_id=$(if([string]::IsNullOrWhiteSpace($ControllerThreadId)){$null}else{$ControllerHostId}); controller_epoch=$(if([string]::IsNullOrWhiteSpace($ControllerThreadId)){0}else{1}); controller_history=@(); status='draft'; current_stage='analysis'; authorization='read-only'; event_sequence=0; created_at=$now; updated_at=$now }
+        $workflow = [ordered]@{ workflow_id=$WorkflowId; project_path=$resolved; state_version=11; controller_thread_id=$(if([string]::IsNullOrWhiteSpace($ControllerThreadId)){$null}else{$ControllerThreadId}); controller_host_id=$(if([string]::IsNullOrWhiteSpace($ControllerThreadId)){$null}else{$ControllerHostId}); controller_epoch=$(if([string]::IsNullOrWhiteSpace($ControllerThreadId)){0}else{1}); controller_history=@(); status='draft'; current_stage='analysis'; authorization='read-only'; event_sequence=0; created_at=$now; updated_at=$now }
         $tasks = @()
         Write-Event $state $workflow 'workflow_initialized' $null $null 'draft' 'initialization'
         Write-JsonAtomic $workflow $workflowPath
         Write-JsonAtomic $tasks (Join-Path $state 'tasks.json')
+        Write-JsonAtomic @() (Join-Path $state 'external-actions.json')
+    }
+}
+
+function Start-WorkflowExternalAction {
+    param([string]$ProjectPath,[string]$TaskId,[ValidateSet('dispatch_send','callback_ack')][string]$ActionType,[int64]$ExpectedControllerEpoch)
+    $state=Join-Path ([IO.Path]::GetFullPath($ProjectPath)) '.codex-orchestrator'
+    Invoke-WithStateLock $state {
+        $workflowPath=Join-Path $state 'workflow.json';$tasksPath=Join-Path $state 'tasks.json';$actionsPath=Join-Path $state 'external-actions.json'
+        $workflow=Read-StateJson $workflowPath;$tasks=@(Read-StateJson $tasksPath|ForEach-Object{$_});Add-Defaults $workflow $tasks;$actions=@(Read-ExternalActions $state)
+        if([int64]$workflow.controller_epoch -ne $ExpectedControllerEpoch){throw 'STALE_CONTROLLER_LEASE: controller epoch changed.'}
+        $task=@($tasks|Where-Object{$_.task_id -eq $TaskId});if($task.Count -ne 1){throw "Task not found: $TaskId"};$task=$task[0]
+        $prior=@($actions|Where-Object{$_.task_id -eq $TaskId -and $_.action_type -eq $ActionType})
+        if(@($prior|Where-Object{$_.status -ne 'cancelled'}).Count -gt 0){throw 'EXTERNAL_ACTION_ALREADY_STARTED: inspect the existing action instead of sending again.'}
+        if($ActionType -eq 'dispatch_send'){
+            if($task.status -ne 'approved' -or $task.delivery_status -ne 'prepared'){throw 'Task is not ready for dispatch send.'}
+            $payload=[ordered]@{threadId=$task.thread_id;hostId=$task.host_id;dispatch_id=$task.dispatch_id;dispatch_path=$task.dispatch_path}
+        }else{
+            if($task.callback_status -ne 'received'){throw 'Task callback is not ready for acknowledgement.'}
+            $body=[ordered]@{type='callback_ack';event_id=$task.callback_event_id;workflow_id=$workflow.workflow_id;task_id=$task.task_id;dispatch_id=$task.dispatch_id;acknowledged_by_thread_id=$workflow.controller_thread_id;status='acknowledged'}|ConvertTo-Json -Compress
+            $payload=[ordered]@{threadId=$task.thread_id;hostId=$task.host_id;callback_event_id=$task.callback_event_id;prompt=$body}
+        }
+        $attempt=$prior.Count+1;$actionId="$($workflow.workflow_id):$($workflow.controller_epoch):$TaskId`:$ActionType`:$attempt";$now=Get-UtcTimestamp
+        $action=[pscustomobject][ordered]@{action_id=$actionId;action_type=$ActionType;task_id=$TaskId;controller_thread_id=$workflow.controller_thread_id;controller_host_id=$workflow.controller_host_id;controller_epoch=[int64]$workflow.controller_epoch;attempt=$attempt;status='prepared';payload=$payload;payload_sha256=(Get-ObjectSha256 $payload);receipt_path=$null;receipt_sha256=$null;message_id=$null;cursor=$null;resolution_evidence_path=$null;resolution_evidence_sha256=$null;created_at=$now;completed_at=$null;cancelled_at=$null}
+        $actions+=$action;Write-Event $state $workflow 'external_action_started' $TaskId $null 'prepared' $actionId
+        $workflow.updated_at=$now;Write-JsonAtomic $workflow $workflowPath;Write-JsonAtomic $tasks $tasksPath;Write-JsonAtomic $actions $actionsPath
+        $action
+    }
+}
+
+function Complete-WorkflowExternalAction {
+    param([string]$ProjectPath,[string]$ActionId,[string]$ReceiptPath,[string]$MessageId,[string]$Cursor,[string]$EvidencePath)
+    $state=Join-Path ([IO.Path]::GetFullPath($ProjectPath)) '.codex-orchestrator'
+    Invoke-WithStateLock $state {
+        $workflowPath=Join-Path $state 'workflow.json';$tasksPath=Join-Path $state 'tasks.json';$actionsPath=Join-Path $state 'external-actions.json'
+        $workflow=Read-StateJson $workflowPath;$tasks=@(Read-StateJson $tasksPath|ForEach-Object{$_});Add-Defaults $workflow $tasks;$actions=@(Read-ExternalActions $state)
+        $action=@($actions|Where-Object{$_.action_id -eq $ActionId});if($action.Count -ne 1){throw "External action not found: $ActionId"};$action=$action[0]
+        if($action.status -eq 'completed'){
+            if(-not(Test-Path -LiteralPath $ReceiptPath) -or (Get-FileHash -LiteralPath $ReceiptPath -Algorithm SHA256).Hash.ToLowerInvariant() -ne $action.receipt_sha256){throw 'Completed external action receipt does not match.'}
+            return $action
+        }
+        if($action.status -ne 'prepared'){throw 'Only a prepared external action can be completed.'}
+        if([int64]$action.controller_epoch -ne [int64]$workflow.controller_epoch -or $action.controller_thread_id -ne $workflow.controller_thread_id -or $action.controller_host_id -ne $workflow.controller_host_id){
+            if([string]::IsNullOrWhiteSpace($EvidencePath) -or -not(Test-Path -LiteralPath $EvidencePath)){throw 'STALE_CONTROLLER_LEASE: takeover recovery requires separate delivery evidence.'}
+            $resolvedEvidence=[IO.Path]::GetFullPath($EvidencePath);$action.resolution_evidence_path=$resolvedEvidence;$action.resolution_evidence_sha256=(Get-FileHash -LiteralPath $resolvedEvidence -Algorithm SHA256).Hash.ToLowerInvariant()
+        }
+        if(-not(Test-Path -LiteralPath $ReceiptPath)){throw 'External action receipt file not found.'}
+        $resolved=[IO.Path]::GetFullPath($ReceiptPath);$action.receipt_path=$resolved;$action.receipt_sha256=(Get-FileHash -LiteralPath $resolved -Algorithm SHA256).Hash.ToLowerInvariant();$action.message_id=$(if([string]::IsNullOrWhiteSpace($MessageId)){$null}else{$MessageId});$action.cursor=$(if([string]::IsNullOrWhiteSpace($Cursor)){$null}else{$Cursor});$action.status='completed';$action.completed_at=Get-UtcTimestamp
+        Write-Event $state $workflow 'external_action_completed' $action.task_id 'prepared' 'completed' $ActionId
+        $workflow.updated_at=Get-UtcTimestamp;Write-JsonAtomic $workflow $workflowPath;Write-JsonAtomic $tasks $tasksPath;Write-JsonAtomic $actions $actionsPath
+        $action
+    }
+}
+
+function Cancel-WorkflowExternalAction {
+    param([string]$ProjectPath,[string]$ActionId,[string]$EvidencePath)
+    $state=Join-Path ([IO.Path]::GetFullPath($ProjectPath)) '.codex-orchestrator'
+    Invoke-WithStateLock $state {
+        $workflowPath=Join-Path $state 'workflow.json';$tasksPath=Join-Path $state 'tasks.json';$actionsPath=Join-Path $state 'external-actions.json'
+        $workflow=Read-StateJson $workflowPath;$tasks=@(Read-StateJson $tasksPath|ForEach-Object{$_});Add-Defaults $workflow $tasks;$actions=@(Read-ExternalActions $state)
+        $action=@($actions|Where-Object{$_.action_id -eq $ActionId});if($action.Count -ne 1){throw "External action not found: $ActionId"};$action=$action[0]
+        if($action.status -ne 'prepared'){throw 'Only an unresolved prepared action can be cancelled.'}
+        if(-not(Test-Path -LiteralPath $EvidencePath)){throw 'Resolution evidence file not found.'}
+        $resolved=[IO.Path]::GetFullPath($EvidencePath);$action.resolution_evidence_path=$resolved;$action.resolution_evidence_sha256=(Get-FileHash -LiteralPath $resolved -Algorithm SHA256).Hash.ToLowerInvariant();$action.status='cancelled';$action.cancelled_at=Get-UtcTimestamp
+        Write-Event $state $workflow 'external_action_cancelled' $action.task_id 'prepared' 'cancelled' $ActionId
+        $workflow.updated_at=Get-UtcTimestamp;Write-JsonAtomic $workflow $workflowPath;Write-JsonAtomic $tasks $tasksPath;Write-JsonAtomic $actions $actionsPath
+        $action
     }
 }
 
@@ -235,7 +315,7 @@ function New-WorkflowDispatch {
 }
 
 function Confirm-WorkflowDispatchSent {
-    param([string]$ProjectPath,[string]$TaskId,[string]$DispatchId,[string]$ReceiptPath,[string]$MessageId,[string]$Cursor)
+    param([string]$ProjectPath,[string]$TaskId,[string]$DispatchId,[string]$ReceiptPath,[string]$MessageId,[string]$Cursor,[string]$ExternalActionId)
     $state = Join-Path ([System.IO.Path]::GetFullPath($ProjectPath)) '.codex-orchestrator'
     Invoke-WithStateLock $state {
         $workflowPath = Join-Path $state 'workflow.json'; $tasksPath = Join-Path $state 'tasks.json'
@@ -246,6 +326,8 @@ function Confirm-WorkflowDispatchSent {
         if ($task.dispatch_id -ne $DispatchId) { throw 'Dispatch ID does not match the prepared dispatch.' }
         if ([string]::IsNullOrWhiteSpace($ReceiptPath) -or -not (Test-Path -LiteralPath $ReceiptPath)) { throw 'A raw send receipt file is required.' }
         $resolvedReceipt=[IO.Path]::GetFullPath($ReceiptPath); $receiptHash=(Get-FileHash -LiteralPath $resolvedReceipt -Algorithm SHA256).Hash.ToLowerInvariant()
+        $externalAction=@(Read-ExternalActions $state|Where-Object{$_.action_id -eq $ExternalActionId});if($externalAction.Count -ne 1 -or $externalAction[0].action_type -ne 'dispatch_send' -or $externalAction[0].task_id -ne $TaskId -or $externalAction[0].status -ne 'completed' -or $externalAction[0].receipt_sha256 -ne $receiptHash){throw 'A matching completed external dispatch action is required.'}
+        if([string]$externalAction[0].message_id -ne [string]$MessageId -or [string]$externalAction[0].cursor -ne [string]$Cursor){throw 'Dispatch receipt metadata does not match the completed external action.'}
         $task.sent_message_id=$(if([string]::IsNullOrWhiteSpace($MessageId)){$null}else{$MessageId}); $task.send_receipt_path=$resolvedReceipt; $task.send_receipt_sha256=$receiptHash; $task.read_cursor=$Cursor; $task.delivery_status='sent'; $task.dispatched_at=Get-UtcTimestamp; $task.dispatch_count=[int]$task.dispatch_count+1; $task.status='dispatched'; $task.updated_at=Get-UtcTimestamp
         $stageByRole = @{ analyst='analysis'; developer='implementation'; tester='test'; reviewer='review' }; $workflow.current_stage=$stageByRole[[string]$task.role]; $workflow.status='running'
         Write-Event $state $workflow 'dispatch_sent' $TaskId 'prepared' 'sent' $MessageId
@@ -337,7 +419,7 @@ function Receive-WorkflowCallback {
 }
 
 function Confirm-WorkflowCallbackAcknowledged {
-    param([string]$ProjectPath,[string]$TaskId,[string]$CallbackEventId,[string]$ReceiptPath)
+    param([string]$ProjectPath,[string]$TaskId,[string]$CallbackEventId,[string]$ReceiptPath,[string]$ExternalActionId)
     $state=Join-Path ([IO.Path]::GetFullPath($ProjectPath)) '.codex-orchestrator'
     Invoke-WithStateLock $state {
         $workflowPath=Join-Path $state 'workflow.json';$tasksPath=Join-Path $state 'tasks.json'
@@ -350,7 +432,8 @@ function Confirm-WorkflowCallbackAcknowledged {
         $ackReceipt=Read-StateJson $ReceiptPath
         if($ackReceipt.PSObject.Properties.Match('threadId').Count -eq 0 -or $ackReceipt.threadId -ne $task.thread_id){throw 'Callback acknowledgement was not sent to the worker thread.'}
         $resolved=[IO.Path]::GetFullPath($ReceiptPath)
-        $task.callback_ack_receipt_path=$resolved;$task.callback_ack_receipt_sha256=(Get-FileHash -LiteralPath $resolved -Algorithm SHA256).Hash.ToLowerInvariant()
+        $receiptHash=(Get-FileHash -LiteralPath $resolved -Algorithm SHA256).Hash.ToLowerInvariant();$externalAction=@(Read-ExternalActions $state|Where-Object{$_.action_id -eq $ExternalActionId});if($externalAction.Count -ne 1 -or $externalAction[0].action_type -ne 'callback_ack' -or $externalAction[0].task_id -ne $TaskId -or $externalAction[0].status -ne 'completed' -or $externalAction[0].receipt_sha256 -ne $receiptHash){throw 'A matching completed external callback action is required.'}
+        $task.callback_ack_receipt_path=$resolved;$task.callback_ack_receipt_sha256=$receiptHash
         $task.callback_acknowledged_at=Get-UtcTimestamp;$task.callback_status='acknowledged';$task.updated_at=Get-UtcTimestamp
         Write-Event $state $workflow 'callback_acknowledged' $TaskId 'received' 'acknowledged' $CallbackEventId
         $workflow.updated_at=Get-UtcTimestamp;Write-JsonAtomic $workflow $workflowPath;Write-JsonAtomic $tasks $tasksPath
@@ -422,8 +505,10 @@ function Get-WorkflowReconciliation {
     param([string]$ProjectPath,[string]$TaskId)
     $state=Get-WorkflowState -ProjectPath $ProjectPath
     $task=@($state.tasks|Where-Object{$_.task_id -eq $TaskId}); if($task.Count -ne 1){throw "Task not found: $TaskId"}; $task=$task[0]; Add-Defaults $state.workflow @($state.tasks)
-    $decision = if($task.callback_status -eq 'received'){'send_callback_ack'}else{switch ("$($task.status)|$($task.delivery_status)") {
-        'approved|prepared' {'send_prepared_dispatch'}
+    $actions=@(Read-ExternalActions (Join-Path ([IO.Path]::GetFullPath($ProjectPath)) '.codex-orchestrator'))
+    function Get-ExternalDecision([string]$Type,[string]$Begin,[string]$Record){$attempts=@($actions|Where-Object{$_.task_id -eq $task.task_id -and $_.action_type -eq $Type}|Sort-Object attempt);if(-not $attempts.Count -or $attempts[-1].status -eq 'cancelled'){$Begin}elseif($attempts[-1].status -eq 'prepared'){'inspect_external_action'}else{$Record}}
+    $decision = if($task.callback_status -eq 'received'){Get-ExternalDecision 'callback_ack' 'begin_callback_ack' 'record_callback_ack'}else{switch ("$($task.status)|$($task.delivery_status)") {
+        'approved|prepared' {Get-ExternalDecision 'dispatch_send' 'begin_dispatch_send' 'record_dispatch_send'}
         'dispatched|sent' {'wait_for_acknowledgement'}
         'running|acknowledged' {if($task.latest_turn_status -eq 'completed' -and $task.latest_item_phase -eq 'final_answer' -and -not [string]::IsNullOrWhiteSpace($task.latest_turn_id) -and -not [string]::IsNullOrWhiteSpace($task.latest_item_id)){'fetch_full_result'}else{'wait_for_result'}}
         'verifying|result_received' {if($task.verified){'complete_verified_task'}else{'validate_received_result'}}
@@ -485,6 +570,22 @@ function Test-WorkflowStateIntegrity {
     if ([int]$workflow.event_sequence -ne $events.Count) { throw 'Workflow event_sequence differs from event log.' }
     if (@($tasks | Group-Object task_id | Where-Object Count -gt 1).Count -gt 0) { throw 'Duplicate task_id detected.' }
     if (@($tasks | Group-Object thread_id | Where-Object Count -gt 1).Count -gt 0) { throw 'Duplicate thread_id detected.' }
+    $externalActions=@(Read-ExternalActions $state)
+    if(@($externalActions|Group-Object action_id|Where-Object Count -gt 1).Count -gt 0){throw 'Duplicate external action ID detected.'}
+    foreach($externalAction in $externalActions){
+        if($externalAction.status -notin @('prepared','completed','cancelled')){throw "Invalid external action status: $($externalAction.action_id)"}
+        if((Get-ObjectSha256 $externalAction.payload) -ne $externalAction.payload_sha256){throw "External action payload hash mismatch: $($externalAction.action_id)"}
+        if([int64]$externalAction.controller_epoch -gt [int64]$workflow.controller_epoch){throw "External action controller epoch is invalid: $($externalAction.action_id)"}
+        $lease=$(if([int64]$externalAction.controller_epoch -eq [int64]$workflow.controller_epoch){$workflow}else{@($workflow.controller_history|Where-Object{[int64]$_.epoch -eq [int64]$externalAction.controller_epoch})[0]})
+        $leaseThread=$(if($lease.PSObject.Properties.Match('controller_thread_id').Count){$lease.controller_thread_id}else{$lease.thread_id});$leaseHost=$(if($lease.PSObject.Properties.Match('controller_host_id').Count){$lease.controller_host_id}else{$lease.host_id})
+        if($leaseThread -ne $externalAction.controller_thread_id -or $leaseHost -ne $externalAction.controller_host_id){throw "External action controller identity mismatch: $($externalAction.action_id)"}
+        if($externalAction.status -eq 'completed' -and ([string]::IsNullOrWhiteSpace($externalAction.receipt_path) -or -not(Test-Path -LiteralPath $externalAction.receipt_path) -or (Get-FileHash -LiteralPath $externalAction.receipt_path -Algorithm SHA256).Hash.ToLowerInvariant() -ne $externalAction.receipt_sha256)){throw "External action receipt mismatch: $($externalAction.action_id)"}
+        if(-not [string]::IsNullOrWhiteSpace($externalAction.resolution_evidence_path) -and (-not(Test-Path -LiteralPath $externalAction.resolution_evidence_path) -or (Get-FileHash -LiteralPath $externalAction.resolution_evidence_path -Algorithm SHA256).Hash.ToLowerInvariant() -ne $externalAction.resolution_evidence_sha256)){throw "External action resolution evidence mismatch: $($externalAction.action_id)"}
+        if($externalAction.status -eq 'cancelled' -and ([string]::IsNullOrWhiteSpace($externalAction.resolution_evidence_path) -or -not(Test-Path -LiteralPath $externalAction.resolution_evidence_path) -or (Get-FileHash -LiteralPath $externalAction.resolution_evidence_path -Algorithm SHA256).Hash.ToLowerInvariant() -ne $externalAction.resolution_evidence_sha256)){throw "External action resolution evidence mismatch: $($externalAction.action_id)"}
+        $started=@($events|Where-Object{$_.type -eq 'external_action_started' -and $_.reason -eq $externalAction.action_id}).Count;$completed=@($events|Where-Object{$_.type -eq 'external_action_completed' -and $_.reason -eq $externalAction.action_id}).Count;$cancelled=@($events|Where-Object{$_.type -eq 'external_action_cancelled' -and $_.reason -eq $externalAction.action_id}).Count
+        if($started -ne 1 -or ($externalAction.status -eq 'prepared' -and ($completed -ne 0 -or $cancelled -ne 0)) -or ($externalAction.status -eq 'completed' -and ($completed -ne 1 -or $cancelled -ne 0)) -or ($externalAction.status -eq 'cancelled' -and ($completed -ne 0 -or $cancelled -ne 1))){throw "External action event history mismatch: $($externalAction.action_id)"}
+    }
+    foreach($group in @($externalActions|Group-Object task_id,action_type)){ $ordered=@($group.Group|Sort-Object attempt);for($attemptIndex=0;$attemptIndex -lt $ordered.Count;$attemptIndex++){if([int]$ordered[$attemptIndex].attempt -ne ($attemptIndex+1)){throw "External action attempt sequence is invalid: $($group.Name)"}} }
     foreach ($task in $tasks) {
         if ($task.delivery_status -ne 'not-prepared' -and ([string]::IsNullOrWhiteSpace($task.dispatch_id) -or [string]::IsNullOrWhiteSpace($task.dispatch_path) -or -not (Test-Path -LiteralPath $task.dispatch_path))) { throw "Task dispatch evidence is incomplete: $($task.task_id)" }
         if ($task.delivery_status -in @('sent','acknowledged','result_received') -and ([string]::IsNullOrWhiteSpace($task.send_receipt_path) -or [string]::IsNullOrWhiteSpace($task.send_receipt_sha256) -or -not(Test-Path -LiteralPath $task.send_receipt_path) -or [string]::IsNullOrWhiteSpace($task.dispatched_at))) { throw "Task send evidence is incomplete: $($task.task_id)" }
@@ -525,7 +626,7 @@ function Get-WorkflowState {
     param([string]$ProjectPath)
     $state = Join-Path ([System.IO.Path]::GetFullPath($ProjectPath)) '.codex-orchestrator'
     $workflow=Read-StateJson (Join-Path $state 'workflow.json');$tasks=@(Read-StateJson (Join-Path $state 'tasks.json')|ForEach-Object{$_});Add-Defaults $workflow $tasks
-    [ordered]@{workflow=$workflow;tasks=$tasks}
+    [ordered]@{workflow=$workflow;tasks=$tasks;external_actions=@(Read-ExternalActions $state)}
 }
 
-Export-ModuleMember -Function Initialize-WorkflowState,Set-WorkflowController,Set-WorkflowControllerTakeover,Register-WorkflowTask,Set-WorkflowTaskState,New-WorkflowDispatch,Confirm-WorkflowDispatchSent,Confirm-WorkflowAcknowledged,Receive-WorkflowCallback,Confirm-WorkflowCallbackAcknowledged,Receive-WorkflowResult,Confirm-WorkflowResultVerified,Record-WorkflowThreadObservation,Record-WorkflowWaitSnapshot,Get-WorkflowReconciliation,Get-WorkflowState,Test-WorkflowStateIntegrity
+Export-ModuleMember -Function Initialize-WorkflowState,Set-WorkflowController,Set-WorkflowControllerTakeover,Register-WorkflowTask,Set-WorkflowTaskState,New-WorkflowDispatch,Start-WorkflowExternalAction,Complete-WorkflowExternalAction,Cancel-WorkflowExternalAction,Confirm-WorkflowDispatchSent,Confirm-WorkflowAcknowledged,Receive-WorkflowCallback,Confirm-WorkflowCallbackAcknowledged,Receive-WorkflowResult,Confirm-WorkflowResultVerified,Record-WorkflowThreadObservation,Record-WorkflowWaitSnapshot,Get-WorkflowReconciliation,Get-WorkflowState,Test-WorkflowStateIntegrity

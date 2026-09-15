@@ -10,11 +10,22 @@ function Get-Task([string]$Project,[string]$TaskId) {
     @(Get-Content (Join-Path $Project '.codex-orchestrator\tasks.json') -Raw -Encoding UTF8 | ConvertFrom-Json | ForEach-Object { $_ } | Where-Object { $_.task_id -eq $TaskId })[0]
 }
 
+function Complete-ExternalAction([string]$Project,[string]$TaskId,[string]$Type,[string]$Receipt,[string]$MessageId,[string]$Cursor){
+    $workflow=Get-Content (Join-Path $Project '.codex-orchestrator\workflow.json') -Raw -Encoding UTF8|ConvertFrom-Json
+    Invoke-Manager @('-Action','begin-external-action','-ProjectPath',$Project,'-TaskId',$TaskId,'-ExternalActionType',$Type,'-ExpectedControllerEpoch',[string]$workflow.controller_epoch)|Should Be 0|Out-Null
+    $action=@(Get-Content (Join-Path $Project '.codex-orchestrator\external-actions.json') -Raw -Encoding UTF8|ConvertFrom-Json|ForEach-Object{$_}|Where-Object{$_.task_id -eq $TaskId -and $_.action_type -eq $Type}|Sort-Object attempt)[-1]
+    $arguments=@('-Action','complete-external-action','-ProjectPath',$Project,'-ExternalActionId',$action.action_id,'-ReceiptPath',$Receipt)
+    if($MessageId){$arguments+=@('-MessageId',$MessageId)};if($Cursor){$arguments+=@('-Cursor',$Cursor)}
+    Invoke-Manager $arguments|Should Be 0|Out-Null
+    $action.action_id
+}
+
 function Start-Task([string]$Project,[string]$TaskId) {
     Invoke-Manager @('-Action','prepare-dispatch','-ProjectPath',$Project,'-TaskId',$TaskId) | Should Be 0 | Out-Null
     $dispatchId = (Get-Task $Project $TaskId).dispatch_id
     $receipt = Join-Path $Project "$TaskId.send-receipt.json"; Set-Content $receipt '{"sent":true}'
-    Invoke-Manager @('-Action','record-sent','-ProjectPath',$Project,'-TaskId',$TaskId,'-DispatchId',$dispatchId,'-ReceiptPath',$receipt,'-MessageId',"sent-$TaskId",'-Cursor',"cursor-sent-$TaskId") | Should Be 0 | Out-Null
+    $externalActionId=Complete-ExternalAction $Project $TaskId 'dispatch_send' $receipt "sent-$TaskId" "cursor-sent-$TaskId"
+    Invoke-Manager @('-Action','record-sent','-ProjectPath',$Project,'-TaskId',$TaskId,'-DispatchId',$dispatchId,'-ReceiptPath',$receipt,'-MessageId',"sent-$TaskId",'-Cursor',"cursor-sent-$TaskId",'-ExternalActionId',$externalActionId) | Should Be 0 | Out-Null
     Invoke-Manager @('-Action','record-ack','-ProjectPath',$Project,'-TaskId',$TaskId,'-DispatchId',$dispatchId,'-Cursor',"cursor-ack-$TaskId") | Should Be 0 | Out-Null
     return $dispatchId
 }
@@ -32,7 +43,8 @@ function Complete-CallbackHandshake([string]$Project,[string]$TaskId) {
     $receipt=Join-Path $Project "$TaskId.callback.json";[IO.File]::WriteAllText($receipt,($callback|ConvertTo-Json -Compress),[Text.UTF8Encoding]::new($false))
     Invoke-Manager @('-Action','record-callback','-ProjectPath',$Project,'-TaskId',$TaskId,'-CallbackEventId',$task.callback_event_id,'-ReceiptPath',$receipt)|Should Be 0|Out-Null
     $ack=Join-Path $Project "$TaskId.callback-ack.json";[IO.File]::WriteAllText($ack,(@{threadId=$task.thread_id}|ConvertTo-Json -Compress),[Text.UTF8Encoding]::new($false))
-    Invoke-Manager @('-Action','record-callback-ack','-ProjectPath',$Project,'-TaskId',$TaskId,'-CallbackEventId',$task.callback_event_id,'-ReceiptPath',$ack)|Should Be 0|Out-Null
+    $externalActionId=Complete-ExternalAction $Project $TaskId 'callback_ack' $ack $null $null
+    Invoke-Manager @('-Action','record-callback-ack','-ProjectPath',$Project,'-TaskId',$TaskId,'-CallbackEventId',$task.callback_event_id,'-ReceiptPath',$ack,'-ExternalActionId',$externalActionId)|Should Be 0|Out-Null
 }
 
 function Write-NormalizedResult([string]$Path,[string]$Project,[string]$TaskId,[string]$ThreadId,[string]$DispatchId,[string]$MessageId) {
@@ -58,7 +70,7 @@ Describe 'manage-workflow lifecycle' {
     It 'initializes versioned state and an event log' {
         Invoke-Manager @('-Action','initialize','-ProjectPath',$project,'-WorkflowId','WF-001') | Should Be 0
         $workflow = Get-Content (Join-Path $project '.codex-orchestrator\workflow.json') -Raw | ConvertFrom-Json
-        $workflow.state_version | Should Be 10
+        $workflow.state_version | Should Be 11
         $workflow.controller_thread_id | Should Be 'controller-1'
         $workflow.event_sequence | Should Be 1
         @(Get-Content (Join-Path $project '.codex-orchestrator\events.jsonl')).Count | Should Be 1
@@ -74,7 +86,7 @@ Describe 'manage-workflow lifecycle' {
         $state=Join-Path $project '.codex-orchestrator';New-Item -ItemType Directory $state|Out-Null;$now=(Get-Date).ToUniversalTime().ToString('o')
         @{workflow_id='WF-OLD';project_path=$project;state_version=7;status='draft';current_stage='analysis';authorization='read-only';event_sequence=0;created_at=$now;updated_at=$now}|ConvertTo-Json|Set-Content (Join-Path $state 'workflow.json');Set-Content (Join-Path $state 'tasks.json') '[]';Set-Content (Join-Path $state 'events.jsonl') -Value @()
         Invoke-Manager @('-Action','configure-controller','-ProjectPath',$project,'-ControllerThreadId','controller-new')|Should Be 0
-        $workflow=Get-Content (Join-Path $state 'workflow.json') -Raw|ConvertFrom-Json;$workflow.controller_thread_id|Should Be 'controller-new';$workflow.state_version|Should Be 10
+        $workflow=Get-Content (Join-Path $state 'workflow.json') -Raw|ConvertFrom-Json;$workflow.controller_thread_id|Should Be 'controller-new';$workflow.state_version|Should Be 11
         Invoke-Manager @('-Action','configure-controller','-ProjectPath',$project,'-ControllerThreadId','controller-new')|Should Be 0
         Invoke-Manager @('-Action','configure-controller','-ProjectPath',$project,'-ControllerThreadId','controller-other')|Should Be 1
     }
@@ -104,6 +116,41 @@ Describe 'manage-workflow lifecycle' {
     It 'rejects using one identity as controller and worker' {
         Invoke-Manager @('-Action','initialize','-ProjectPath',$project,'-WorkflowId','WF-001') | Should Be 0
         Invoke-Manager @('-Action','register','-ProjectPath',$project,'-TaskId','ANALYSIS-001','-ThreadId','controller-1','-Role','analyst','-Objective','invalid') | Should Be 1
+    }
+
+    It 'stops on an unresolved external send and rejects completion from an old controller lease' {
+        Invoke-Manager @('-Action','initialize','-ProjectPath',$project,'-WorkflowId','WF-001')|Should Be 0
+        Invoke-Manager @('-Action','register','-ProjectPath',$project,'-TaskId','ANALYSIS-001','-ThreadId','thread-1','-Role','analyst','-Objective','analyze')|Should Be 0
+        foreach($status in @('awaiting_approval','approved')){Invoke-Manager @('-Action','transition','-ProjectPath',$project,'-TaskId','ANALYSIS-001','-ToStatus',$status,'-Reason','advance')|Should Be 0}
+        Invoke-Manager @('-Action','prepare-dispatch','-ProjectPath',$project,'-TaskId','ANALYSIS-001')|Should Be 0
+        Invoke-Manager @('-Action','begin-external-action','-ProjectPath',$project,'-TaskId','ANALYSIS-001','-ExternalActionType','dispatch_send','-ExpectedControllerEpoch','1')|Should Be 0
+        Invoke-Manager @('-Action','begin-external-action','-ProjectPath',$project,'-TaskId','ANALYSIS-001','-ExternalActionType','dispatch_send','-ExpectedControllerEpoch','1')|Should Be 1
+        Get-ReconcileDecision $project 'ANALYSIS-001'|Should Be 'inspect_external_action'
+        $action=@(Get-Content (Join-Path $project '.codex-orchestrator\external-actions.json') -Raw -Encoding UTF8|ConvertFrom-Json|ForEach-Object{$_})[0]
+        Invoke-Manager @('-Action','takeover-controller','-ProjectPath',$project,'-ExpectedControllerThreadId','controller-1','-ExpectedControllerEpoch','1','-ControllerThreadId','controller-2','-TakeoverReason','controller lost after send')|Should Be 0
+        $receipt=Join-Path $project 'late-receipt.json';Set-Content $receipt '{"threadId":"thread-1"}'
+        Invoke-Manager @('-Action','complete-external-action','-ProjectPath',$project,'-ExternalActionId',$action.action_id,'-ReceiptPath',$receipt)|Should Be 1
+        $deliveryEvidence=Join-Path $project 'delivery-observation.json';Set-Content $deliveryEvidence '{"observed":"delivered"}'
+        Invoke-Manager @('-Action','complete-external-action','-ProjectPath',$project,'-ExternalActionId',$action.action_id,'-ReceiptPath',$receipt,'-EvidencePath',$deliveryEvidence)|Should Be 0
+        Get-ReconcileDecision $project 'ANALYSIS-001'|Should Be 'record_dispatch_send'
+    }
+
+    It 'cancels a proven unsent action and completes one replacement idempotently' {
+        Invoke-Manager @('-Action','initialize','-ProjectPath',$project,'-WorkflowId','WF-001')|Should Be 0
+        Invoke-Manager @('-Action','register','-ProjectPath',$project,'-TaskId','ANALYSIS-001','-ThreadId','thread-1','-Role','analyst','-Objective','analyze')|Should Be 0
+        foreach($status in @('awaiting_approval','approved')){Invoke-Manager @('-Action','transition','-ProjectPath',$project,'-TaskId','ANALYSIS-001','-ToStatus',$status,'-Reason','advance')|Should Be 0};Invoke-Manager @('-Action','prepare-dispatch','-ProjectPath',$project,'-TaskId','ANALYSIS-001')|Should Be 0
+        $dispatchId=(Get-Task $project 'ANALYSIS-001').dispatch_id;$bypassReceipt=Join-Path $project 'bypass.json';Set-Content $bypassReceipt '{"threadId":"thread-1"}'
+        Invoke-Manager @('-Action','record-sent','-ProjectPath',$project,'-TaskId','ANALYSIS-001','-DispatchId',$dispatchId,'-ReceiptPath',$bypassReceipt,'-ExternalActionId','missing')|Should Be 1
+        Invoke-Manager @('-Action','begin-external-action','-ProjectPath',$project,'-TaskId','ANALYSIS-001','-ExternalActionType','dispatch_send','-ExpectedControllerEpoch','1')|Should Be 0
+        $first=@(Get-Content (Join-Path $project '.codex-orchestrator\external-actions.json') -Raw -Encoding UTF8|ConvertFrom-Json|ForEach-Object{$_})[0];$evidence=Join-Path $project 'not-sent.json';Set-Content $evidence '{"verified":"not-sent"}'
+        Invoke-Manager @('-Action','cancel-external-action','-ProjectPath',$project,'-ExternalActionId',$first.action_id,'-EvidencePath',$evidence)|Should Be 0
+        Get-ReconcileDecision $project 'ANALYSIS-001'|Should Be 'begin_dispatch_send'
+        Invoke-Manager @('-Action','begin-external-action','-ProjectPath',$project,'-TaskId','ANALYSIS-001','-ExternalActionType','dispatch_send','-ExpectedControllerEpoch','1')|Should Be 0
+        $second=@(Get-Content (Join-Path $project '.codex-orchestrator\external-actions.json') -Raw -Encoding UTF8|ConvertFrom-Json|ForEach-Object{$_}|Sort-Object attempt)[-1];$second.attempt|Should Be 2
+        $receipt=Join-Path $project 'receipt.json';Set-Content $receipt '{"threadId":"thread-1"}';Invoke-Manager @('-Action','complete-external-action','-ProjectPath',$project,'-ExternalActionId',$second.action_id,'-ReceiptPath',$receipt)|Should Be 0
+        Invoke-Manager @('-Action','complete-external-action','-ProjectPath',$project,'-ExternalActionId',$second.action_id,'-ReceiptPath',$receipt)|Should Be 0
+        $wrongReceipt=Join-Path $project 'wrong-receipt.json';Set-Content $wrongReceipt '{"threadId":"other"}';Invoke-Manager @('-Action','complete-external-action','-ProjectPath',$project,'-ExternalActionId',$second.action_id,'-ReceiptPath',$wrongReceipt)|Should Be 1
+        Invoke-Manager @('-Action','audit','-ProjectPath',$project)|Should Be 0
     }
 
     It 'rejects duplicate task ids and insufficient role authorization' {
@@ -185,7 +232,7 @@ Describe 'manage-workflow lifecycle' {
         Set-Content (Join-Path $state 'tasks.json') '[]'
         Invoke-Manager @('-Action','register','-ProjectPath',$project,'-TaskId','ANALYSIS-001','-ThreadId','thread-1','-Role','analyst','-Objective','analyze') | Should Be 0
         $workflow = Get-Content (Join-Path $state 'workflow.json') -Raw | ConvertFrom-Json
-        $workflow.state_version | Should Be 10
+        $workflow.state_version | Should Be 11
         $workflow.event_sequence | Should Be 1
     }
 
@@ -196,7 +243,7 @@ Describe 'manage-workflow lifecycle' {
         Set-Content (Join-Path $state 'tasks.json') '[]'
         Invoke-Manager @('-Action','register','-ProjectPath',$project,'-TaskId','ANALYSIS-001','-ThreadId','thread-1','-Role','analyst','-Objective','analyze') | Should Be 0
         $workflow = Get-Content (Join-Path $state 'workflow.json') -Raw | ConvertFrom-Json
-        $workflow.state_version | Should Be 10
+        $workflow.state_version | Should Be 11
         (Get-Task $project 'ANALYSIS-001').delivery_status | Should Be 'not-prepared'
     }
 
@@ -209,7 +256,7 @@ Describe 'manage-workflow lifecycle' {
         foreach($name in @('normalized_result_sha256','verification_receipt_path','verification_receipt_sha256','verified_at','latest_turn_status','latest_item_phase')){$tasks[0].PSObject.Properties.Remove($name)}
         $tasks|ConvertTo-Json -Depth 20|Set-Content (Join-Path $state 'tasks.json')
         Invoke-Manager @('-Action','transition','-ProjectPath',$project,'-TaskId','ANALYSIS-001','-ToStatus','awaiting_approval','-Reason','upgrade') | Should Be 0
-        (Get-Content (Join-Path $state 'workflow.json') -Raw|ConvertFrom-Json).state_version | Should Be 10
+        (Get-Content (Join-Path $state 'workflow.json') -Raw|ConvertFrom-Json).state_version | Should Be 11
         $upgraded=Get-Task $project 'ANALYSIS-001';$upgraded.PSObject.Properties.Name -contains 'verification_receipt_path' | Should Be $true;$upgraded.PSObject.Properties.Name -contains 'latest_turn_status'|Should Be $true;$upgraded.latest_item_phase|Should Be $null
     }
 
@@ -278,10 +325,11 @@ Describe 'manage-workflow lifecycle' {
         Invoke-Manager @('-Action','register','-ProjectPath',$project,'-TaskId','ANALYSIS-001','-ThreadId','thread-1','-Role','analyst','-Objective','analyze') | Should Be 0
         foreach ($state in @('awaiting_approval','approved')) { Invoke-Manager @('-Action','transition','-ProjectPath',$project,'-TaskId','ANALYSIS-001','-ToStatus',$state,'-Reason','advance') | Should Be 0 }
         Invoke-Manager @('-Action','prepare-dispatch','-ProjectPath',$project,'-TaskId','ANALYSIS-001') | Should Be 0
-        Get-ReconcileDecision $project 'ANALYSIS-001' | Should Be 'send_prepared_dispatch'
+        Get-ReconcileDecision $project 'ANALYSIS-001' | Should Be 'begin_dispatch_send'
         $dispatchId = (Get-Task $project 'ANALYSIS-001').dispatch_id
         $receipt = Join-Path $project 'send-receipt.json'; Set-Content $receipt '{"sent":true}'
-        Invoke-Manager @('-Action','record-sent','-ProjectPath',$project,'-TaskId','ANALYSIS-001','-DispatchId',$dispatchId,'-ReceiptPath',$receipt,'-MessageId','sent-1','-Cursor','cursor-1') | Should Be 0
+        $externalActionId=Complete-ExternalAction $project 'ANALYSIS-001' 'dispatch_send' $receipt 'sent-1' 'cursor-1'
+        Invoke-Manager @('-Action','record-sent','-ProjectPath',$project,'-TaskId','ANALYSIS-001','-DispatchId',$dispatchId,'-ReceiptPath',$receipt,'-MessageId','sent-1','-Cursor','cursor-1','-ExternalActionId',$externalActionId) | Should Be 0
         Get-ReconcileDecision $project 'ANALYSIS-001' | Should Be 'wait_for_acknowledgement'
         Invoke-Manager @('-Action','record-ack','-ProjectPath',$project,'-TaskId','ANALYSIS-001','-DispatchId',$dispatchId,'-Cursor','cursor-2') | Should Be 0
         Get-ReconcileDecision $project 'ANALYSIS-001' | Should Be 'wait_for_result'
@@ -297,7 +345,10 @@ Describe 'manage-workflow lifecycle' {
         Invoke-Manager @('-Action','prepare-dispatch','-ProjectPath',$project,'-TaskId','ANALYSIS-001') | Should Be 0
         $dispatchId=(Get-Task $project 'ANALYSIS-001').dispatch_id
         $receipt=Join-Path $project 'receipt.json'; Set-Content $receipt '{"accepted":true}'
-        Invoke-Manager @('-Action','record-sent','-ProjectPath',$project,'-TaskId','ANALYSIS-001','-DispatchId',$dispatchId,'-ReceiptPath',$receipt,'-Cursor','cursor-1') | Should Be 0
+        $externalActionId=Complete-ExternalAction $project 'ANALYSIS-001' 'dispatch_send' $receipt $null 'cursor-1'
+        Invoke-Manager @('-Action','record-sent','-ProjectPath',$project,'-TaskId','ANALYSIS-001','-DispatchId',$dispatchId,'-ReceiptPath',$receipt,'-MessageId','forged-message','-Cursor','cursor-1','-ExternalActionId',$externalActionId) | Should Be 1
+        Invoke-Manager @('-Action','record-sent','-ProjectPath',$project,'-TaskId','ANALYSIS-001','-DispatchId',$dispatchId,'-ReceiptPath',$receipt,'-Cursor','forged-cursor','-ExternalActionId',$externalActionId) | Should Be 1
+        Invoke-Manager @('-Action','record-sent','-ProjectPath',$project,'-TaskId','ANALYSIS-001','-DispatchId',$dispatchId,'-ReceiptPath',$receipt,'-Cursor','cursor-1','-ExternalActionId',$externalActionId) | Should Be 0
         $task=Get-Task $project 'ANALYSIS-001'; $task.sent_message_id | Should Be $null; $task.send_receipt_sha256.Length | Should Be 64
         Invoke-Manager @('-Action','audit','-ProjectPath',$project)|Should Be 0
         Add-Content $receipt 'tampered'

@@ -19,6 +19,8 @@ function New-WorkflowActionPlan {
     $currentState=Get-WorkflowState -ProjectPath $resolvedProject
     $workflow=$currentState.workflow
     $tasks=@($currentState.tasks)
+    $externalActionsPath=Join-Path $stateDirectory 'external-actions.json'
+    $externalActions=$(if(Test-Path -LiteralPath $externalActionsPath){@(Get-Content -LiteralPath $externalActionsPath -Raw -Encoding UTF8|ConvertFrom-Json|ForEach-Object{$_})}else{@()})
     $actions=[Collections.Generic.List[object]]::new();$waitTargets=[Collections.Generic.List[object]]::new()
     $sequence=[int64]$workflow.event_sequence
 
@@ -35,8 +37,15 @@ function New-WorkflowActionPlan {
     $orderedTasks=@($tasks|Sort-Object @{Expression={$roleOrder[[string]$_.role]}},task_id)
     foreach($task in $orderedTasks){
         if($task.callback_status -eq 'received'){
-            $ackBody=[ordered]@{type='callback_ack';event_id=$task.callback_event_id;workflow_id=$workflow.workflow_id;task_id=$task.task_id;dispatch_id=$task.dispatch_id;acknowledged_by_thread_id=$workflow.controller_thread_id;status='acknowledged'}|ConvertTo-Json -Compress
-            Add-Action 'send_callback_ack' @($task.task_id) 'send_message_to_thread' ([ordered]@{threadId=$task.thread_id;hostId=$task.host_id;callback_event_id=$task.callback_event_id;prompt=$ackBody}) @('raw send receipt','callback event ID') $true $null 'A received completion callback must be acknowledged exactly once before further processing.'
+            $attempts=@($externalActions|Where-Object{$_.task_id -eq $task.task_id -and $_.action_type -eq 'callback_ack'}|Sort-Object attempt)
+            $attempt=$(if($attempts.Count){$attempts[-1]}else{$null})
+            if($null -eq $attempt -or $attempt.status -eq 'cancelled'){
+                Add-Action 'begin_external_action' @($task.task_id) 'manage-workflow:begin-external-action' ([ordered]@{task_id=$task.task_id;external_action_type='callback_ack';expected_controller_epoch=[int64]$workflow.controller_epoch}) @('persisted external action intent before tool call') $true $null 'Persist the callback acknowledgement intent before calling the host tool.'
+            }elseif($attempt.status -eq 'prepared'){
+                Add-Action 'inspect_external_action' @($task.task_id) 'inspect_task_delivery' ([ordered]@{external_action_id=$attempt.action_id;task_id=$task.task_id;action_type='callback_ack'}) @('target task observation','host tool history or recovered receipt') $false 'explicit-user-direction' 'The acknowledgement may already have been sent; never resend it automatically.'
+            }elseif($attempt.status -eq 'completed'){
+                Add-Action 'record_external_action' @($task.task_id) 'manage-workflow:record-callback-ack' ([ordered]@{task_id=$task.task_id;callback_event_id=$task.callback_event_id;receipt_path=$attempt.receipt_path;external_action_id=$attempt.action_id}) @('completed external action','matching receipt hash') $true $null 'Apply the completed acknowledgement receipt without another host call.'
+            }
             continue
         }
         if($task.status -in @('blocked','failed','cancelled','stale')){
@@ -66,7 +75,15 @@ function New-WorkflowActionPlan {
             continue
         }
         if($task.status -eq 'approved' -and $task.delivery_status -eq 'prepared'){
-            Add-Action 'send_message' @($task.task_id) 'send_message_to_thread' ([ordered]@{threadId=$task.thread_id;hostId=$task.host_id;dispatch_path=$task.dispatch_path}) @('raw send receipt','optional host message ID','cursor') $true $null 'Prepared dispatch is ready for its assigned task.'
+            $attempts=@($externalActions|Where-Object{$_.task_id -eq $task.task_id -and $_.action_type -eq 'dispatch_send'}|Sort-Object attempt)
+            $attempt=$(if($attempts.Count){$attempts[-1]}else{$null})
+            if($null -eq $attempt -or $attempt.status -eq 'cancelled'){
+                Add-Action 'begin_external_action' @($task.task_id) 'manage-workflow:begin-external-action' ([ordered]@{task_id=$task.task_id;external_action_type='dispatch_send';expected_controller_epoch=[int64]$workflow.controller_epoch}) @('persisted external action intent before tool call') $true $null 'Persist the dispatch intent before calling the host tool.'
+            }elseif($attempt.status -eq 'prepared'){
+                Add-Action 'inspect_external_action' @($task.task_id) 'inspect_task_delivery' ([ordered]@{external_action_id=$attempt.action_id;task_id=$task.task_id;action_type='dispatch_send'}) @('target task observation','host tool history or recovered receipt') $false 'explicit-user-direction' 'The dispatch may already have been sent; never resend it automatically.'
+            }elseif($attempt.status -eq 'completed'){
+                Add-Action 'record_external_action' @($task.task_id) 'manage-workflow:record-sent' ([ordered]@{task_id=$task.task_id;dispatch_id=$task.dispatch_id;receipt_path=$attempt.receipt_path;message_id=$attempt.message_id;cursor=$attempt.cursor;external_action_id=$attempt.action_id}) @('completed external action','matching receipt hash') $true $null 'Apply the completed send receipt without another host call.'
+            }
             continue
         }
         if($task.status -eq 'dispatched' -and $task.delivery_status -eq 'sent'){
@@ -108,8 +125,8 @@ function New-WorkflowActionPlan {
         Add-Action 'workflow_complete' @() 'report_completion' ([ordered]@{workflow_id=$workflow.workflow_id}) @('successful workflow audit','final delivery report') $false $null 'Every task is trusted complete.'
     }
     [pscustomobject][ordered]@{
-        schema_version=2;workflow_id=$workflow.workflow_id;project_path=$resolvedProject;controller_thread_id=$workflow.controller_thread_id;controller_host_id=$workflow.controller_host_id;controller_epoch=[int64]$workflow.controller_epoch;based_on_event_sequence=$sequence
-        workflow_state_sha256=(Get-FileSha256 $workflowPath);tasks_state_sha256=(Get-FileSha256 $tasksPath)
+        schema_version=3;workflow_id=$workflow.workflow_id;project_path=$resolvedProject;controller_thread_id=$workflow.controller_thread_id;controller_host_id=$workflow.controller_host_id;controller_epoch=[int64]$workflow.controller_epoch;based_on_event_sequence=$sequence
+        workflow_state_sha256=(Get-FileSha256 $workflowPath);tasks_state_sha256=(Get-FileSha256 $tasksPath);external_actions_sha256=$(if(Test-Path -LiteralPath $externalActionsPath){Get-FileSha256 $externalActionsPath}else{$null})
         generated_at=(Get-Date).ToUniversalTime().ToString('o');actions=@($actions)
     }
 }

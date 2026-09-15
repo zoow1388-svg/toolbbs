@@ -32,5 +32,9 @@
 28. 只使用 `takeover-controller` 比较并交换总控身份。出现 `STALE_CONTROLLER_LEASE` 说明状态已被其他总控改变，立即停止并重新读取，禁止用更大的任期猜测重试。
 29. 接管成功后废弃所有旧动作计划并重新生成。新旧总控不得共用同一执行任务身份。
 30. 已派发任务继续使用其 `callback_target_thread_id`、`callback_target_host_id` 和 `dispatch_controller_epoch`；不得改写派发信封或生成替代回传事件。旧回传目标不可访问时，使用保存的等待和完整读取证据恢复并进入人工检查。
+31. v1.2 恢复时先读取 `external-actions.json`。`prepared` 表示工具可能已经执行，动作只能是 `inspect_external_action`，禁止直接重发。
+32. 找回真实工具回执后执行 `complete-external-action`；确认没有投递后保存核查证据并执行 `cancel-external-action`。没有证据时保持未决状态。
+33. 接管后的新总控完成旧任期动作时，除原始工具回执外还必须提供独立投递观察；普通完成命令不得跨任期确认。
+34. `completed` 事务尚未写入任务状态时，只执行计划中的 `record_external_action`，不得再次调用宿主工具。事务账本哈希变化后旧动作计划立即失效。
 
 清理只限本次流程创建并可确认无用的临时文件；不得删除用途不明文件、用户修改、生产数据或动态入口。

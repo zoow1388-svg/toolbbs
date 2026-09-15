@@ -30,6 +30,8 @@
 - 角色门禁分别要求 `plan_ready`、`implementation_complete`、`tests_executed` 和 `code_review_complete`。测试至少有一项通过检查，审查不得遗留发现。
 - 总控身份使用单调递增任期；接管必须匹配旧身份和旧任期，并在项目锁内一次完成。接管后所有旧动作计划失效。
 - 已派发任务的总控任期和回传目标不可变；只有接管后的新派发使用新总控身份。
+- 派发发送和回传 ACK 必须先登记外部动作意图。`prepared` 动作在恢复时视为可能已送达，禁止自动重试。
+- 只有匹配的 `completed` 外部动作才能写入 `record-sent` 或 `record-callback-ack`；确认未送达并保存证据后才能取消并重试。
 
 ## 返修
 

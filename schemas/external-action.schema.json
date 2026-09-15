@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "external-action.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["action_id", "action_type", "task_id", "controller_thread_id", "controller_host_id", "controller_epoch", "attempt", "status", "payload", "payload_sha256", "receipt_path", "receipt_sha256", "message_id", "cursor", "resolution_evidence_path", "resolution_evidence_sha256", "created_at", "completed_at", "cancelled_at"],
+  "properties": {
+    "action_id": {"type": "string", "minLength": 1},
+    "action_type": {"enum": ["dispatch_send", "callback_ack"]},
+    "task_id": {"type": "string", "minLength": 1},
+    "controller_thread_id": {"type": "string", "minLength": 1},
+    "controller_host_id": {"type": "string", "minLength": 1},
+    "controller_epoch": {"type": "integer", "minimum": 1},
+    "attempt": {"type": "integer", "minimum": 1},
+    "status": {"enum": ["prepared", "completed", "cancelled"]},
+    "payload": {"type": "object"},
+    "payload_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+    "receipt_path": {"type": ["string", "null"]},
+    "receipt_sha256": {"type": ["string", "null"], "pattern": "^[a-f0-9]{64}$"},
+    "message_id": {"type": ["string", "null"]},
+    "cursor": {"type": ["string", "null"]},
+    "resolution_evidence_path": {"type": ["string", "null"]},
+    "resolution_evidence_sha256": {"type": ["string", "null"], "pattern": "^[a-f0-9]{64}$"},
+    "created_at": {"type": "string", "format": "date-time"},
+    "completed_at": {"type": ["string", "null"], "format": "date-time"},
+    "cancelled_at": {"type": ["string", "null"], "format": "date-time"}
+  }
+}

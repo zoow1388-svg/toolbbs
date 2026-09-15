@@ -138,3 +138,15 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File '.\skill\codex-project-o
 ```
 
 只有与当前状态完全匹配的第一个接管请求能成功。接管会递增任期、保留历史并使旧动作计划失效。已派发任务继续使用派发时固化的旧回传目标和事件，不修改信封、不重复派发；新派发使用新总控和新任期。
+
+## v1.2 外部动作事务日志
+
+向任务发送派发或回传 ACK 前，必须先持久化外部动作意图：
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File '.\skill\codex-project-orchestrator\scripts\manage-workflow.ps1' -Action begin-external-action -ProjectPath 'D:\目标项目' -TaskId 'ANALYSIS-001' -ExternalActionType dispatch_send -ExpectedControllerEpoch 1
+```
+
+使用返回的不可变 `payload` 调用 Codex 任务工具。只有工具真实成功后，保存原始响应并执行 `complete-external-action`；随后按动作计划用同一 `ExternalActionId` 调用 `record-sent` 或 `record-callback-ack`。状态管理器拒绝没有已完成事务支撑的发送回执。
+
+若总控在工具调用前后断开，事务保持 `prepared`，计划器只生成 `inspect_external_action`，不会自动重发。确认未送达后用证据文件执行 `cancel-external-action` 才能产生下一次尝试；确认已送达则用原始回执完成事务。接管后的新总控处理旧任期动作时必须额外提供独立投递证据。

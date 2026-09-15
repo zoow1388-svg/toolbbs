@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory=$true)][ValidateSet('initialize','configure-controller','takeover-controller','register','transition','prepare-dispatch','record-sent','record-observation','record-wait','record-ack','record-callback','record-callback-ack','record-result','verify-result','reconcile','show','audit')][string]$Action,
+    [Parameter(Mandatory=$true)][ValidateSet('initialize','configure-controller','takeover-controller','register','transition','prepare-dispatch','begin-external-action','complete-external-action','cancel-external-action','record-sent','record-observation','record-wait','record-ack','record-callback','record-callback-ack','record-result','verify-result','reconcile','show','audit')][string]$Action,
     [Parameter(Mandatory=$true)][string]$ProjectPath,
     [string]$WorkflowId,[string]$TaskId,[string]$ThreadId,[string]$HostId='local',[string]$ControllerThreadId,[string]$ControllerHostId='local',[string]$ExpectedControllerThreadId,[string]$ExpectedControllerHostId='local',[int64]$ExpectedControllerEpoch,[string]$TakeoverReason,
     [ValidateSet('analyst','developer','tester','reviewer')][string]$Role,
@@ -8,7 +8,8 @@ param(
     [string]$DependsOn='',[string]$AllowedFiles='',[string]$RepairOf,
     [string]$ToStatus,[string]$Reason,[string]$RawResultPath,[string]$NormalizedResultPath,[switch]$Verified,
     [string]$DispatchId,[string]$CallbackEventId,[string]$MessageId,[string]$ResultMessageId,[string]$Cursor,[string]$ReceiptPath,
-    [string]$ObservedProjectPath,[string]$ObservedStatus,[string]$ObservationPath,[string]$SnapshotPath
+    [string]$ObservedProjectPath,[string]$ObservedStatus,[string]$ObservationPath,[string]$SnapshotPath,
+    [ValidateSet('dispatch_send','callback_ack')][string]$ExternalActionType,[string]$ExternalActionId,[string]$EvidencePath
 )
 
 $ErrorActionPreference = 'Stop'
@@ -26,12 +27,15 @@ switch ($Action) {
     }
     'transition' { if (-not $TaskId -or -not $ToStatus -or -not $Reason) { throw 'TaskId, ToStatus, and Reason are required.' }; if ($Verified -or $RawResultPath -or $NormalizedResultPath) { throw 'Result evidence cannot be trusted through transition; use verify-result first.' }; Set-WorkflowTaskState -ProjectPath $ProjectPath -TaskId $TaskId -ToStatus $ToStatus -Reason $Reason }
     'prepare-dispatch' { if (-not $TaskId) { throw 'TaskId is required.' }; New-WorkflowDispatch -ProjectPath $ProjectPath -TaskId $TaskId | ConvertTo-Json -Depth 20 }
-    'record-sent' { if (-not $TaskId -or -not $DispatchId -or -not $ReceiptPath) { throw 'TaskId, DispatchId, and ReceiptPath are required.' }; Confirm-WorkflowDispatchSent -ProjectPath $ProjectPath -TaskId $TaskId -DispatchId $DispatchId -ReceiptPath $ReceiptPath -MessageId $MessageId -Cursor $Cursor }
+    'begin-external-action' { if(-not $TaskId -or -not $ExternalActionType){throw 'TaskId and ExternalActionType are required.'};Start-WorkflowExternalAction -ProjectPath $ProjectPath -TaskId $TaskId -ActionType $ExternalActionType -ExpectedControllerEpoch $ExpectedControllerEpoch|ConvertTo-Json -Depth 20 }
+    'complete-external-action' { if(-not $ExternalActionId -or -not $ReceiptPath){throw 'ExternalActionId and ReceiptPath are required.'};Complete-WorkflowExternalAction -ProjectPath $ProjectPath -ActionId $ExternalActionId -ReceiptPath $ReceiptPath -MessageId $MessageId -Cursor $Cursor -EvidencePath $EvidencePath|ConvertTo-Json -Depth 20 }
+    'cancel-external-action' { if(-not $ExternalActionId -or -not $EvidencePath){throw 'ExternalActionId and EvidencePath are required.'};Cancel-WorkflowExternalAction -ProjectPath $ProjectPath -ActionId $ExternalActionId -EvidencePath $EvidencePath|ConvertTo-Json -Depth 20 }
+    'record-sent' { if (-not $TaskId -or -not $DispatchId -or -not $ReceiptPath -or -not $ExternalActionId) { throw 'TaskId, DispatchId, ReceiptPath, and ExternalActionId are required.' }; Confirm-WorkflowDispatchSent -ProjectPath $ProjectPath -TaskId $TaskId -DispatchId $DispatchId -ReceiptPath $ReceiptPath -MessageId $MessageId -Cursor $Cursor -ExternalActionId $ExternalActionId }
     'record-observation' { if (-not $TaskId -or -not $ThreadId -or -not $HostId -or -not $ObservedProjectPath -or -not $ObservedStatus -or -not $ObservationPath) { throw 'TaskId, ThreadId, HostId, ObservedProjectPath, ObservedStatus, and ObservationPath are required.' }; Record-WorkflowThreadObservation -ProjectPath $ProjectPath -TaskId $TaskId -ThreadId $ThreadId -HostId $HostId -ObservedProjectPath $ObservedProjectPath -ObservedStatus $ObservedStatus -Cursor $Cursor -ObservationPath $ObservationPath }
     'record-wait' { if (-not $TaskId -or -not $SnapshotPath) { throw 'TaskId and SnapshotPath are required.' }; Record-WorkflowWaitSnapshot -ProjectPath $ProjectPath -TaskId $TaskId -SnapshotPath $SnapshotPath }
     'record-ack' { if (-not $TaskId -or -not $DispatchId) { throw 'TaskId and DispatchId are required.' }; Confirm-WorkflowAcknowledged -ProjectPath $ProjectPath -TaskId $TaskId -DispatchId $DispatchId -Cursor $Cursor }
     'record-callback' { if(-not $TaskId -or -not $CallbackEventId -or -not $ReceiptPath){throw 'TaskId, CallbackEventId, and ReceiptPath are required.'};Receive-WorkflowCallback -ProjectPath $ProjectPath -TaskId $TaskId -CallbackEventId $CallbackEventId -ReceiptPath $ReceiptPath }
-    'record-callback-ack' { if(-not $TaskId -or -not $CallbackEventId -or -not $ReceiptPath){throw 'TaskId, CallbackEventId, and ReceiptPath are required.'};Confirm-WorkflowCallbackAcknowledged -ProjectPath $ProjectPath -TaskId $TaskId -CallbackEventId $CallbackEventId -ReceiptPath $ReceiptPath }
+    'record-callback-ack' { if(-not $TaskId -or -not $CallbackEventId -or -not $ReceiptPath -or -not $ExternalActionId){throw 'TaskId, CallbackEventId, ReceiptPath, and ExternalActionId are required.'};Confirm-WorkflowCallbackAcknowledged -ProjectPath $ProjectPath -TaskId $TaskId -CallbackEventId $CallbackEventId -ReceiptPath $ReceiptPath -ExternalActionId $ExternalActionId }
     'record-result' { if (-not $TaskId -or -not $DispatchId -or -not $ThreadId -or -not $ResultMessageId -or -not $RawResultPath) { throw 'TaskId, DispatchId, ThreadId, ResultMessageId, and RawResultPath are required.' }; Receive-WorkflowResult -ProjectPath $ProjectPath -TaskId $TaskId -DispatchId $DispatchId -ThreadId $ThreadId -ResultMessageId $ResultMessageId -Cursor $Cursor -RawResultPath $RawResultPath }
     'verify-result' { if (-not $TaskId -or -not $NormalizedResultPath) { throw 'TaskId and NormalizedResultPath are required.' }; Confirm-WorkflowResultVerified -ProjectPath $ProjectPath -TaskId $TaskId -NormalizedResultPath $NormalizedResultPath | ConvertTo-Json -Depth 20 }
     'reconcile' { if (-not $TaskId) { throw 'TaskId is required.' }; Get-WorkflowReconciliation -ProjectPath $ProjectPath -TaskId $TaskId | ConvertTo-Json -Depth 20 }

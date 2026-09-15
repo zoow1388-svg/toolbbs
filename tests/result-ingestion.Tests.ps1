@@ -68,7 +68,10 @@ Describe 'native task result ingestion' {
         (Invoke-Script $manager @('-Action','prepare-dispatch','-ProjectPath',$project,'-TaskId','ANALYSIS-001')).ExitCode | Should Be 0
         $dispatchId = (Get-RecordedTask $project).dispatch_id
         $receipt = Join-Path $project 'receipt.json'; Set-Content $receipt '{"sent":true}'
-        (Invoke-Script $manager @('-Action','record-sent','-ProjectPath',$project,'-TaskId','ANALYSIS-001','-DispatchId',$dispatchId,'-ReceiptPath',$receipt)).ExitCode | Should Be 0
+        (Invoke-Script $manager @('-Action','begin-external-action','-ProjectPath',$project,'-TaskId','ANALYSIS-001','-ExternalActionType','dispatch_send','-ExpectedControllerEpoch','1')).ExitCode|Should Be 0
+        $externalAction=@(Get-Content (Join-Path $project '.codex-orchestrator\external-actions.json') -Raw -Encoding UTF8|ConvertFrom-Json|ForEach-Object{$_})[0]
+        (Invoke-Script $manager @('-Action','complete-external-action','-ProjectPath',$project,'-ExternalActionId',$externalAction.action_id,'-ReceiptPath',$receipt)).ExitCode|Should Be 0
+        (Invoke-Script $manager @('-Action','record-sent','-ProjectPath',$project,'-TaskId','ANALYSIS-001','-DispatchId',$dispatchId,'-ReceiptPath',$receipt,'-ExternalActionId',$externalAction.action_id)).ExitCode | Should Be 0
         (Invoke-Script $manager @('-Action','record-ack','-ProjectPath',$project,'-TaskId','ANALYSIS-001','-DispatchId',$dispatchId)).ExitCode | Should Be 0
         (Invoke-Script $manager @('-Action','record-wait','-ProjectPath',$project,'-TaskId','ANALYSIS-001','-SnapshotPath',$activeSnapshot)).ExitCode | Should Be 0
         $activeTask=Get-RecordedTask $project;$activeTask.latest_turn_status|Should Be 'inProgress';$activeTask.latest_item_phase|Should Be 'commentary'

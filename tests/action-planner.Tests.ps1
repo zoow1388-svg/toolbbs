@@ -8,6 +8,7 @@ function Invoke-Tool([string]$Path,[string[]]$Arguments){
 }
 function Invoke-Manager([string[]]$Arguments){(Invoke-Tool $manager $Arguments).ExitCode}
 function Read-Task([string]$Project,[string]$TaskId){@(Get-Content (Join-Path $Project '.codex-orchestrator\tasks.json') -Raw -Encoding UTF8|ConvertFrom-Json|ForEach-Object{$_}|Where-Object{$_.task_id -eq $TaskId})[0]}
+function Read-ExternalAction([string]$Project,[string]$TaskId,[string]$Type){@(Get-Content (Join-Path $Project '.codex-orchestrator\external-actions.json') -Raw -Encoding UTF8|ConvertFrom-Json|ForEach-Object{$_}|Where-Object{$_.task_id -eq $TaskId -and $_.action_type -eq $Type}|Sort-Object attempt)[-1]}
 function New-Plan([string]$Project,[string]$Path){
     (Invoke-Tool $planner @('-ProjectPath',$Project,'-OutputPath',$Path)).ExitCode|Should Be 0
     Get-Content $Path -Raw -Encoding UTF8|ConvertFrom-Json
@@ -32,7 +33,12 @@ Describe 'workflow action planner' {
         (Read-Task $project 'ANALYSIS-001').status|Should Be 'draft'
         Approve-Task $project 'ANALYSIS-001';$plan=New-Plan $project (Join-Path $project 'approved-plan.json');$plan.actions[0].type|Should Be 'prepare_dispatch'
         Invoke-Manager @('-Action','prepare-dispatch','-ProjectPath',$project,'-TaskId','ANALYSIS-001')|Should Be 0
-        $plan=New-Plan $project (Join-Path $project 'prepared-plan.json');$plan.actions[0].type|Should Be 'send_message';$plan.actions[0].operation|Should Be 'send_message_to_thread'
+        $plan=New-Plan $project (Join-Path $project 'prepared-plan.json');$plan.actions[0].type|Should Be 'begin_external_action';$plan.actions[0].operation|Should Be 'manage-workflow:begin-external-action'
+        Invoke-Manager @('-Action','begin-external-action','-ProjectPath',$project,'-TaskId','ANALYSIS-001','-ExternalActionType','dispatch_send','-ExpectedControllerEpoch','1')|Should Be 0
+        (New-Plan $project (Join-Path $project 'uncertain-plan.json')).actions[0].type|Should Be 'inspect_external_action'
+        $external=Read-ExternalAction $project 'ANALYSIS-001' 'dispatch_send';$receipt=Join-Path $project 'send.json';Set-Content $receipt '{"threadId":"thread-1"}'
+        Invoke-Manager @('-Action','complete-external-action','-ProjectPath',$project,'-ExternalActionId',$external.action_id,'-ReceiptPath',$receipt,'-MessageId','message-1','-Cursor','cursor-1')|Should Be 0
+        $recordPlan=New-Plan $project (Join-Path $project 'record-plan.json');$recordPlan.actions[0].type|Should Be 'record_external_action';$recordPlan.actions[0].parameters.receipt_path|Should Be $receipt
         (Read-Task $project 'ANALYSIS-001').delivery_status|Should Be 'prepared'
     }
 
@@ -44,10 +50,17 @@ Describe 'workflow action planner' {
         (Invoke-Tool $currentCheck @('-ProjectPath',$project,'-PlanPath',$path)).ExitCode|Should Be 1
     }
 
+    It 'rejects a pre-journal action plan schema' {
+        Invoke-Manager @('-Action','register','-ProjectPath',$project,'-TaskId','ANALYSIS-001','-ThreadId','thread-1','-Role','analyst','-Objective','analyze')|Should Be 0
+        $path=Join-Path $project 'legacy-plan.json';$null=New-Plan $project $path;$plan=Get-Content $path -Raw -Encoding UTF8|ConvertFrom-Json;$plan.schema_version=2;$plan.PSObject.Properties.Remove('external_actions_sha256')
+        [IO.File]::WriteAllText($path,($plan|ConvertTo-Json -Depth 20),[Text.UTF8Encoding]::new($false))
+        (Invoke-Tool $currentCheck @('-ProjectPath',$project,'-PlanPath',$path)).ExitCode|Should Be 1
+    }
+
     It 'invalidates an old action plan after controller takeover' {
         Invoke-Manager @('-Action','register','-ProjectPath',$project,'-TaskId','ANALYSIS-001','-ThreadId','thread-1','-Role','analyst','-Objective','analyze')|Should Be 0
         $path=Join-Path $project 'old-controller-plan.json';$plan=New-Plan $project $path
-        $plan.schema_version|Should Be 2;$plan.controller_epoch|Should Be 1;$plan.controller_thread_id|Should Be 'controller-1'
+        $plan.schema_version|Should Be 3;$plan.controller_epoch|Should Be 1;$plan.controller_thread_id|Should Be 'controller-1'
         Invoke-Manager @('-Action','takeover-controller','-ProjectPath',$project,'-ExpectedControllerThreadId','controller-1','-ExpectedControllerEpoch','1','-ControllerThreadId','controller-2','-TakeoverReason','controller replacement')|Should Be 0
         (Invoke-Tool $currentCheck @('-ProjectPath',$project,'-PlanPath',$path)).ExitCode|Should Be 1
         $newPlan=New-Plan $project (Join-Path $project 'new-controller-plan.json');$newPlan.controller_epoch|Should Be 2;$newPlan.controller_thread_id|Should Be 'controller-2'
@@ -78,7 +91,9 @@ Describe 'workflow action planner' {
     It 'reports workflow completion only after trusted verification' {
         Invoke-Manager @('-Action','register','-ProjectPath',$project,'-TaskId','ANALYSIS-001','-ThreadId','thread-1','-Role','analyst','-Objective','analyze')|Should Be 0;Approve-Task $project 'ANALYSIS-001'
         Invoke-Manager @('-Action','prepare-dispatch','-ProjectPath',$project,'-TaskId','ANALYSIS-001')|Should Be 0;$dispatchId=(Read-Task $project 'ANALYSIS-001').dispatch_id
-        $receipt=Join-Path $project 'receipt.json';Set-Content $receipt '{}';Invoke-Manager @('-Action','record-sent','-ProjectPath',$project,'-TaskId','ANALYSIS-001','-DispatchId',$dispatchId,'-ReceiptPath',$receipt)|Should Be 0
+        $receipt=Join-Path $project 'receipt.json';Set-Content $receipt '{}';Invoke-Manager @('-Action','begin-external-action','-ProjectPath',$project,'-TaskId','ANALYSIS-001','-ExternalActionType','dispatch_send','-ExpectedControllerEpoch','1')|Should Be 0
+        $sendAction=Read-ExternalAction $project 'ANALYSIS-001' 'dispatch_send';Invoke-Manager @('-Action','complete-external-action','-ProjectPath',$project,'-ExternalActionId',$sendAction.action_id,'-ReceiptPath',$receipt)|Should Be 0
+        Invoke-Manager @('-Action','record-sent','-ProjectPath',$project,'-TaskId','ANALYSIS-001','-DispatchId',$dispatchId,'-ReceiptPath',$receipt,'-ExternalActionId',$sendAction.action_id)|Should Be 0
         $sentPlan=New-Plan $project (Join-Path $project 'sent-plan.json');$sentPlan.actions[0].type|Should Be 'wait_tasks';$sentPlan.actions[0].parameters.targets[0].PSObject.Properties.Match('afterCursor').Count|Should Be 0
         Invoke-Manager @('-Action','record-ack','-ProjectPath',$project,'-TaskId','ANALYSIS-001','-DispatchId',$dispatchId)|Should Be 0
         (New-Plan $project (Join-Path $project 'running-plan.json')).actions[0].type|Should Be 'wait_tasks'
@@ -91,8 +106,12 @@ Describe 'workflow action planner' {
         (New-Plan $project (Join-Path $project 'verified-plan.json')).actions[0].type|Should Be 'wait_callback'
         $callback=Write-CallbackReceipt $project 'ANALYSIS-001';$eventId=(Read-Task $project 'ANALYSIS-001').callback_event_id
         Invoke-Manager @('-Action','record-callback','-ProjectPath',$project,'-TaskId','ANALYSIS-001','-CallbackEventId',$eventId,'-ReceiptPath',$callback)|Should Be 0
-        $ackPlan=New-Plan $project (Join-Path $project 'ack-plan.json');$ackPlan.actions[0].type|Should Be 'send_callback_ack';$ackPlan.actions[0].parameters.prompt|Should Match $eventId
-        $ack=Join-Path $project 'ack.json';Set-Content $ack '{"threadId":"thread-1"}';Invoke-Manager @('-Action','record-callback-ack','-ProjectPath',$project,'-TaskId','ANALYSIS-001','-CallbackEventId',$eventId,'-ReceiptPath',$ack)|Should Be 0
+        $ackPlan=New-Plan $project (Join-Path $project 'ack-plan.json');$ackPlan.actions[0].type|Should Be 'begin_external_action'
+        Invoke-Manager @('-Action','begin-external-action','-ProjectPath',$project,'-TaskId','ANALYSIS-001','-ExternalActionType','callback_ack','-ExpectedControllerEpoch','1')|Should Be 0
+        $ackAction=Read-ExternalAction $project 'ANALYSIS-001' 'callback_ack';$ackAction.payload.prompt|Should Match $eventId
+        $ack=Join-Path $project 'ack.json';Set-Content $ack '{"threadId":"thread-1"}';Invoke-Manager @('-Action','complete-external-action','-ProjectPath',$project,'-ExternalActionId',$ackAction.action_id,'-ReceiptPath',$ack)|Should Be 0
+        (New-Plan $project (Join-Path $project 'record-ack-plan.json')).actions[0].type|Should Be 'record_external_action'
+        Invoke-Manager @('-Action','record-callback-ack','-ProjectPath',$project,'-TaskId','ANALYSIS-001','-CallbackEventId',$eventId,'-ReceiptPath',$ack,'-ExternalActionId',$ackAction.action_id)|Should Be 0
         (New-Plan $project (Join-Path $project 'acknowledged-plan.json')).actions[0].type|Should Be 'complete_task'
         Invoke-Manager @('-Action','transition','-ProjectPath',$project,'-TaskId','ANALYSIS-001','-ToStatus','completed','-Reason','verified')|Should Be 0
         $plan=New-Plan $project (Join-Path $project 'complete-plan.json');@($plan.actions).Count|Should Be 1;$plan.actions[0].type|Should Be 'workflow_complete'
