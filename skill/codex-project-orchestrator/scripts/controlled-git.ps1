@@ -60,9 +60,11 @@ $testHash=$null;$reviewHash=$null;$changed=@();$endRevision=$request.base_revisi
 switch([string]$request.operation){
     'create_worktree' {
         if(-not([string]$request.branch_name).StartsWith('codex/')){throw 'Controlled branches must use the codex/ prefix.'}
+        if($worktree-eq$repository-or$worktree.StartsWith("$repository\",[StringComparison]::OrdinalIgnoreCase)){throw 'Worktree path cannot be the repository root or a directory inside it.'}
         if(Test-Path -LiteralPath $worktree){throw 'Worktree path already exists.'}
         if((Invoke-Git $repository @('show-ref','--verify','--quiet',"refs/heads/$($request.branch_name)") -AllowFailure).exit_code -eq 0){throw 'Branch already exists.'}
         if(Get-ChangedFiles $repository){throw 'Repository root is dirty; refusing worktree creation.'}
+        $worktreeParent=Split-Path -Parent $worktree;if(-not(Test-Path -LiteralPath $worktreeParent)){[void](New-Item -ItemType Directory -Path $worktreeParent -Force)}
         [void](Invoke-Git $repository @('worktree','add','-b',[string]$request.branch_name,$worktree,[string]$request.base_revision))
         if((Get-Head $worktree) -ne $request.base_revision -or (Get-Branch $worktree) -ne $request.branch_name -or (Get-ChangedFiles $worktree)){throw 'Created worktree identity verification failed.'}
     }

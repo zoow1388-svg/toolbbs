@@ -6,7 +6,7 @@ $workflow=Get-Content (Join-Path $state 'workflow.json') -Raw -Encoding UTF8|Con
 $tasks=@(Get-Content (Join-Path $state 'tasks.json') -Raw -Encoding UTF8|ConvertFrom-Json|ForEach-Object{$_});$found=@($tasks|Where-Object{$_.task_id-eq$TaskId})
 if($found.Count-ne1){throw 'Task not found.'};$task=$found[0]
 if($task.role-ne'developer'-or$task.authorization-ne'git-approved'){throw 'Developer task is not approved for Git automation.'}
-$root=$null;if($Operation -eq 'create_worktree'){if([string]::IsNullOrWhiteSpace([string]$workflow.git_worktree_root)){throw 'Git worktree root is not configured.'};$root=[IO.Path]::GetFullPath([string]$workflow.git_worktree_root);if(-not$root.StartsWith('D:\',[StringComparison]::OrdinalIgnoreCase)){throw 'Git worktree root must be on D drive.'}}
+$root=$null;if($Operation -eq 'create_worktree'){if([string]::IsNullOrWhiteSpace([string]$workflow.git_worktree_root)){throw 'Git worktree root is not configured.'};if(-not[IO.Path]::IsPathRooted([string]$workflow.git_worktree_root)){throw 'Git worktree root must be absolute.'};$root=[IO.Path]::GetFullPath([string]$workflow.git_worktree_root).TrimEnd('\');$projectRoot=$project.TrimEnd('\');if($root-eq[IO.Path]::GetPathRoot($root).TrimEnd('\')){throw 'Git worktree root cannot be a drive root.'};if($root-eq$projectRoot-or$root.StartsWith("$projectRoot\",[StringComparison]::OrdinalIgnoreCase)){throw 'Git worktree root cannot be inside the project.'}}
 $safe=($TaskId.ToLowerInvariant()-replace'[^a-z0-9._-]','-').Trim('-');$branch="codex/$safe";$worktree=$(if($task.worktree_path){$task.worktree_path}else{Join-Path $root "$($workflow.workflow_id)-$safe"})
 $testEvidence=$null;$reviewEvidence=$null;$targetBranch=$null
 if($Operation -eq 'create_worktree'){

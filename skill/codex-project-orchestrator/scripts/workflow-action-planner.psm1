@@ -107,7 +107,7 @@ function New-WorkflowActionPlan {
             }
             if($task.role-eq'developer'-and[string]::IsNullOrWhiteSpace([string]$task.worktree_path)){
                 if($task.authorization-ne'git-approved'){Add-Action 'request_authorization' @($task.task_id) 'request_git_authorization' ([ordered]@{task_id=$task.task_id;requested_authorization='git-approved'}) @('explicit Git approval') $false 'git-approved' 'Automatic worktree creation requires explicit Git authorization.'}
-                elseif([string]::IsNullOrWhiteSpace([string]$workflow.git_worktree_root)){Add-Action 'manual_review' @($task.task_id) 'configure_git_worktree_root' ([ordered]@{task_id=$task.task_id}) @('D drive worktree root') $false 'explicit-user-direction' 'Automatic worktree creation requires a configured D drive root.'}
+                elseif([string]::IsNullOrWhiteSpace([string]$workflow.git_worktree_root)){Add-Action 'manual_review' @($task.task_id) 'configure_git_worktree_root' ([ordered]@{task_id=$task.task_id}) @('safe worktree root') $false 'explicit-user-direction' 'Automatic worktree creation requires a safe absolute root outside the project.'}
                 else{$requestPath=Join-Path $stateDirectory "git-requests\$($task.task_id)-create-worktree.json";Add-Action 'controlled_git' @($task.task_id) 'manage-workflow:prepare-git-request' ([ordered]@{task_id=$task.task_id;request_path=$requestPath;expected_controller_epoch=[int64]$workflow.controller_epoch}) @('immutable generated request','journaled Git transaction') $true 'git-approved' 'Approved developer task requires an isolated worktree before dispatch.'}
                 continue
             }

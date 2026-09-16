@@ -60,6 +60,11 @@ Describe 'controlled Git automation' {
         Add-Content -LiteralPath (Join-Path $repo 'README.md') -Value 'dirty'
         {Invoke-Request $root (New-Request 'GIT-021' create_worktree $repo $worktree $base 'codex/dirty') 'create'} | Should Throw
     }
+    It 'rejects a worktree path inside the repository' {
+        $nested=Join-Path $repo 'worktrees\dev-001'
+        {Invoke-Request $root (New-Request 'GIT-022' create_worktree $repo $nested $base 'codex/nested') 'nested'} | Should Throw
+        Test-Path $nested | Should Be $false
+    }
     It 'stops staging when the baseline has changed' {
         Invoke-Request $root (New-Request 'GIT-031' create_worktree $repo $worktree $base 'codex/drift') 'create' | Out-Null
         Set-Content -LiteralPath (Join-Path $worktree 'first.txt') -Value 'first';& git -C $worktree add first.txt;& git -C $worktree commit -m 'test: drift' | Out-Null

@@ -14,6 +14,20 @@ $script:Transitions = @{
 
 function Get-UtcTimestamp { (Get-Date).ToUniversalTime().ToString('o') }
 
+function Get-DefaultGitWorktreeRoot([string]$ProjectPath){
+    $project=[IO.Path]::GetFullPath($ProjectPath).TrimEnd('\');$parent=Split-Path -Parent $project;$name=Split-Path -Leaf $project
+    if([string]::IsNullOrWhiteSpace($parent)-or[string]::IsNullOrWhiteSpace($name)){throw 'Cannot derive a sibling worktree root for this project path.'}
+    [IO.Path]::GetFullPath((Join-Path (Join-Path $parent '.codex-worktrees') $name))
+}
+
+function Assert-SafeGitWorktreeRoot([string]$ProjectPath,[string]$WorktreeRoot){
+    if(-not[IO.Path]::IsPathRooted($WorktreeRoot)){throw 'WorktreeRoot must be an absolute path.'}
+    $project=[IO.Path]::GetFullPath($ProjectPath).TrimEnd('\');$root=[IO.Path]::GetFullPath($WorktreeRoot).TrimEnd('\');$driveRoot=[IO.Path]::GetPathRoot($root).TrimEnd('\')
+    if($root-eq$driveRoot){throw 'WorktreeRoot cannot be a drive root.'}
+    if($root-eq$project-or$root.StartsWith("$project\",[StringComparison]::OrdinalIgnoreCase)){throw 'WorktreeRoot cannot be the project directory or a directory inside it.'}
+    $root
+}
+
 function Write-JsonAtomic {
     param([Parameter(Mandatory=$true)]$Value,[Parameter(Mandatory=$true)][string]$Path)
     $directory = Split-Path -Parent $Path
@@ -87,7 +101,7 @@ function Add-Defaults {
     }
     if($Workflow.PSObject.Properties.Match('controller_epoch').Count -eq 0){Add-Member -InputObject $Workflow -NotePropertyName controller_epoch -NotePropertyValue $(if([string]::IsNullOrWhiteSpace([string]$Workflow.controller_thread_id)){0}else{1})}
     if($Workflow.PSObject.Properties.Match('controller_history').Count -eq 0){Add-Member -InputObject $Workflow -NotePropertyName controller_history -NotePropertyValue @()}
-    if($Workflow.PSObject.Properties.Match('git_worktree_root').Count -eq 0){Add-Member -InputObject $Workflow -NotePropertyName git_worktree_root -NotePropertyValue $null}
+    if($Workflow.PSObject.Properties.Match('git_worktree_root').Count -eq 0){Add-Member -InputObject $Workflow -NotePropertyName git_worktree_root -NotePropertyValue (Get-DefaultGitWorktreeRoot $Workflow.project_path)}elseif([string]::IsNullOrWhiteSpace([string]$Workflow.git_worktree_root)){$Workflow.git_worktree_root=Get-DefaultGitWorktreeRoot $Workflow.project_path}
     if($Workflow.PSObject.Properties.Match('git_target_branch').Count -eq 0){Add-Member -InputObject $Workflow -NotePropertyName git_target_branch -NotePropertyValue 'main'}
     foreach ($task in $Tasks) {
         if($task.PSObject.Properties.Match('git_phase').Count -eq 0){Add-Member -InputObject $task -NotePropertyName git_phase -NotePropertyValue $(if($task.worktree_path){'worktree-ready'}else{'not-started'})}
@@ -125,7 +139,7 @@ function Add-Defaults {
             Add-Member -InputObject $task -NotePropertyName verification_status -NotePropertyValue $verificationStatus
         }
     }
-    if ([int]$Workflow.state_version -lt 18) { $Workflow.state_version = 18 }
+    if ([int]$Workflow.state_version -lt 19) { $Workflow.state_version = 19 }
 }
 
 function Get-LiveWorktreeIdentity {
@@ -160,7 +174,7 @@ function Initialize-WorkflowState {
         $workflowPath = Join-Path $state 'workflow.json'
         if (Test-Path -LiteralPath $workflowPath) { throw 'Workflow already exists.' }
         $now = Get-UtcTimestamp
-        $workflow = [ordered]@{ workflow_id=$WorkflowId; project_path=$resolved; state_version=18; controller_thread_id=$(if([string]::IsNullOrWhiteSpace($ControllerThreadId)){$null}else{$ControllerThreadId}); controller_host_id=$(if([string]::IsNullOrWhiteSpace($ControllerThreadId)){$null}else{$ControllerHostId}); controller_epoch=$(if([string]::IsNullOrWhiteSpace($ControllerThreadId)){0}else{1}); controller_history=@(); git_worktree_root=$null; git_target_branch='main'; status='draft'; current_stage='analysis'; authorization='read-only'; event_sequence=0; created_at=$now; updated_at=$now }
+        $workflow = [ordered]@{ workflow_id=$WorkflowId; project_path=$resolved; state_version=19; controller_thread_id=$(if([string]::IsNullOrWhiteSpace($ControllerThreadId)){$null}else{$ControllerThreadId}); controller_host_id=$(if([string]::IsNullOrWhiteSpace($ControllerThreadId)){$null}else{$ControllerHostId}); controller_epoch=$(if([string]::IsNullOrWhiteSpace($ControllerThreadId)){0}else{1}); controller_history=@(); git_worktree_root=(Get-DefaultGitWorktreeRoot $resolved); git_target_branch='main'; status='draft'; current_stage='analysis'; authorization='read-only'; event_sequence=0; created_at=$now; updated_at=$now }
         $tasks = @()
         Write-Event $state $workflow 'workflow_initialized' $null $null 'draft' 'initialization'
         Write-JsonAtomic $workflow $workflowPath
@@ -175,7 +189,7 @@ function Set-WorkflowGitConfiguration {
     param([string]$ProjectPath,[string]$WorktreeRoot,[string]$TargetBranch='main')
     $state=Join-Path ([IO.Path]::GetFullPath($ProjectPath)) '.codex-orchestrator';Invoke-WithStateLock $state {
         $workflowPath=Join-Path $state 'workflow.json';$tasksPath=Join-Path $state 'tasks.json';$workflow=Read-StateJson $workflowPath;$tasks=@(Read-StateJson $tasksPath|ForEach-Object{$_});Add-Defaults $workflow $tasks
-        $root=[IO.Path]::GetFullPath($WorktreeRoot);if(-not$root.StartsWith('D:\',[StringComparison]::OrdinalIgnoreCase)){throw 'WorktreeRoot must be on D drive.'};if($root -notmatch '^[\x00-\x7F]+$'){throw 'WorktreeRoot must use an ASCII-only path for Windows PowerShell compatibility.'};if([string]::IsNullOrWhiteSpace($TargetBranch)){throw 'TargetBranch is required.'}
+        $root=Assert-SafeGitWorktreeRoot $workflow.project_path $WorktreeRoot;if([string]::IsNullOrWhiteSpace($TargetBranch)){throw 'TargetBranch is required.'}
         $workflow.git_worktree_root=$root;$workflow.git_target_branch=$TargetBranch;$workflow.updated_at=Get-UtcTimestamp;Write-Event $state $workflow 'git_configuration_set' $null $null $TargetBranch $root;Write-JsonAtomic $workflow $workflowPath;Write-JsonAtomic $tasks $tasksPath;$workflow
     }
 }

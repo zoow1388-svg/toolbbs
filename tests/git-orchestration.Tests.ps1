@@ -51,7 +51,6 @@ Describe 'v1.9 Git lifecycle orchestration' {
         @($plan.actions|Where-Object{$_.type-eq'controlled_git'}).Count|Should Be 0
     }
     It 'generates, journals, executes, and binds a developer worktree automatically' {
-        $script:autoRoot="D:\toolbbs-test-worktrees-$([guid]::NewGuid().ToString('N'))";$root=$script:autoRoot;&$manager -Action configure-git -ProjectPath $project -WorktreeRoot $root -TargetBranch main|Out-Null
         $planPath=Join-Path $TestDrive 'auto-plan.json';&$planner -ProjectPath $project -OutputPath $planPath|Out-Null;$plan=Get-Content $planPath -Raw|ConvertFrom-Json
         $prepare=@($plan.actions|Where-Object{$_.operation-eq'manage-workflow:prepare-git-request'});$prepare.Count|Should Be 1
         $generated=$prepare[0].parameters.request_path
@@ -60,6 +59,7 @@ Describe 'v1.9 Git lifecycle orchestration' {
         &$manager -Action complete-git-action -ProjectPath $project -GitActionId $action.git_action_id -GitReceiptPath $receipt|Out-Null
         $task=@((Get-Content (Join-Path $project '.codex-orchestrator\tasks.json') -Raw|ConvertFrom-Json)|Where-Object{$_.task_id-eq'DEV-001'})[0]
         $task.worktree_mode|Should Be 'developer';$task.branch_name|Should Be 'codex/dev-001';Test-Path $task.worktree_path|Should Be $true
+        $task.worktree_path.StartsWith((Join-Path (Split-Path -Parent $project) '.codex-worktrees'),[StringComparison]::OrdinalIgnoreCase)|Should Be $true
     }
     It 'accepts an uncommitted handoff and performs controlled stage and commit' {
         $script:autoRoot="D:\toolbbs-test-worktrees-$([guid]::NewGuid().ToString('N'))";&$manager -Action configure-git -ProjectPath $project -WorktreeRoot $script:autoRoot|Out-Null
