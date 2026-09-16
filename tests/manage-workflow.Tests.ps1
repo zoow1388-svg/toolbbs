@@ -70,7 +70,7 @@ Describe 'manage-workflow lifecycle' {
     It 'initializes versioned state and an event log' {
         Invoke-Manager @('-Action','initialize','-ProjectPath',$project,'-WorkflowId','WF-001') | Should Be 0
         $workflow = Get-Content (Join-Path $project '.codex-orchestrator\workflow.json') -Raw | ConvertFrom-Json
-        $workflow.state_version | Should Be 15
+        $workflow.state_version | Should Be 16
         $workflow.controller_thread_id | Should Be 'controller-1'
         $workflow.event_sequence | Should Be 1
         @(Get-Content (Join-Path $project '.codex-orchestrator\events.jsonl')).Count | Should Be 1
@@ -149,7 +149,7 @@ Describe 'manage-workflow lifecycle' {
         $state=Join-Path $project '.codex-orchestrator';New-Item -ItemType Directory $state|Out-Null;$now=(Get-Date).ToUniversalTime().ToString('o')
         @{workflow_id='WF-OLD';project_path=$project;state_version=7;status='draft';current_stage='analysis';authorization='read-only';event_sequence=0;created_at=$now;updated_at=$now}|ConvertTo-Json|Set-Content (Join-Path $state 'workflow.json');Set-Content (Join-Path $state 'tasks.json') '[]';Set-Content (Join-Path $state 'events.jsonl') -Value @()
         Invoke-Manager @('-Action','configure-controller','-ProjectPath',$project,'-ControllerThreadId','controller-new')|Should Be 0
-        $workflow=Get-Content (Join-Path $state 'workflow.json') -Raw|ConvertFrom-Json;$workflow.controller_thread_id|Should Be 'controller-new';$workflow.state_version|Should Be 15
+        $workflow=Get-Content (Join-Path $state 'workflow.json') -Raw|ConvertFrom-Json;$workflow.controller_thread_id|Should Be 'controller-new';$workflow.state_version|Should Be 16
         Invoke-Manager @('-Action','configure-controller','-ProjectPath',$project,'-ControllerThreadId','controller-new')|Should Be 0
         Invoke-Manager @('-Action','configure-controller','-ProjectPath',$project,'-ControllerThreadId','controller-other')|Should Be 1
     }
@@ -295,7 +295,7 @@ Describe 'manage-workflow lifecycle' {
         Set-Content (Join-Path $state 'tasks.json') '[]'
         Invoke-Manager @('-Action','register','-ProjectPath',$project,'-TaskId','ANALYSIS-001','-ThreadId','thread-1','-Role','analyst','-Objective','analyze') | Should Be 0
         $workflow = Get-Content (Join-Path $state 'workflow.json') -Raw | ConvertFrom-Json
-        $workflow.state_version | Should Be 15
+        $workflow.state_version | Should Be 16
         $workflow.event_sequence | Should Be 1
     }
 
@@ -306,7 +306,7 @@ Describe 'manage-workflow lifecycle' {
         Set-Content (Join-Path $state 'tasks.json') '[]'
         Invoke-Manager @('-Action','register','-ProjectPath',$project,'-TaskId','ANALYSIS-001','-ThreadId','thread-1','-Role','analyst','-Objective','analyze') | Should Be 0
         $workflow = Get-Content (Join-Path $state 'workflow.json') -Raw | ConvertFrom-Json
-        $workflow.state_version | Should Be 15
+        $workflow.state_version | Should Be 16
         (Get-Task $project 'ANALYSIS-001').delivery_status | Should Be 'not-prepared'
     }
 
@@ -319,7 +319,7 @@ Describe 'manage-workflow lifecycle' {
         foreach($name in @('normalized_result_sha256','verification_receipt_path','verification_receipt_sha256','verified_at','latest_turn_status','latest_item_phase')){$tasks[0].PSObject.Properties.Remove($name)}
         $tasks|ConvertTo-Json -Depth 20|Set-Content (Join-Path $state 'tasks.json')
         Invoke-Manager @('-Action','transition','-ProjectPath',$project,'-TaskId','ANALYSIS-001','-ToStatus','awaiting_approval','-Reason','upgrade') | Should Be 0
-        (Get-Content (Join-Path $state 'workflow.json') -Raw|ConvertFrom-Json).state_version | Should Be 15
+        (Get-Content (Join-Path $state 'workflow.json') -Raw|ConvertFrom-Json).state_version | Should Be 16
         $upgraded=Get-Task $project 'ANALYSIS-001';$upgraded.PSObject.Properties.Name -contains 'verification_receipt_path' | Should Be $true;$upgraded.PSObject.Properties.Name -contains 'latest_turn_status'|Should Be $true;$upgraded.latest_item_phase|Should Be $null
     }
 

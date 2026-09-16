@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "git-operation.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["operation_id", "operation", "authorization", "repository_root", "worktree_path", "base_revision", "branch_name", "allowed_files", "commit_message", "target_branch", "test_evidence", "review_evidence", "created_at"],
+  "properties": {
+    "operation_id": {"type": "string", "pattern": "^[A-Z0-9-]+$"},
+    "operation": {"enum": ["create_worktree", "stage", "commit", "merge"]},
+    "authorization": {"const": "git-approved"},
+    "repository_root": {"type": "string", "pattern": "^[A-Za-z]:\\\\"},
+    "worktree_path": {"type": "string", "pattern": "^[A-Za-z]:\\\\"},
+    "base_revision": {"type": "string", "pattern": "^[a-f0-9]{40,64}$"},
+    "branch_name": {"type": "string", "pattern": "^codex/[A-Za-z0-9._/-]+$"},
+    "allowed_files": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+    "commit_message": {"type": ["string", "null"]},
+    "target_branch": {"type": ["string", "null"], "minLength": 1},
+    "test_evidence": {"$ref": "#/$defs/gateEvidence"},
+    "review_evidence": {"$ref": "#/$defs/gateEvidence"},
+    "created_at": {"type": "string", "format": "date-time"}
+  },
+  "$defs": {
+    "gateEvidence": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["task_id", "role", "inspected_revision", "verification_status", "outcome", "receipt_path", "receipt_sha256"],
+      "properties": {
+        "task_id": {"type": "string", "minLength": 1},
+        "role": {"enum": ["tester", "reviewer"]},
+        "inspected_revision": {"type": "string", "pattern": "^[a-f0-9]{40,64}$"},
+        "verification_status": {"const": "trusted"},
+        "outcome": {"const": "passed"},
+        "receipt_path": {"type": "string", "pattern": "^[A-Za-z]:\\\\"},
+        "receipt_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"}
+      }
+    }
+  }
+}

@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory=$true)][ValidateSet('initialize','configure-controller','takeover-controller','register','bind-worktree','transition','prepare-dispatch','claim-action','renew-action','complete-action','fail-action','resolve-action','authorize-action-retry','begin-external-action','complete-external-action','cancel-external-action','record-sent','record-observation','record-wait','record-ack','record-callback','record-callback-ack','record-result','verify-result','reconcile','show','audit')][string]$Action,
+    [Parameter(Mandatory=$true)][ValidateSet('initialize','configure-controller','takeover-controller','register','bind-worktree','transition','prepare-dispatch','claim-action','renew-action','complete-action','fail-action','resolve-action','authorize-action-retry','begin-external-action','complete-external-action','cancel-external-action','record-sent','record-observation','record-wait','record-ack','record-callback','record-callback-ack','record-result','verify-result','controlled-git','reconcile','show','audit')][string]$Action,
     [Parameter(Mandatory=$true)][string]$ProjectPath,
     [string]$WorkflowId,[string]$TaskId,[string]$ThreadId,[string]$HostId='local',[string]$ControllerThreadId,[string]$ControllerHostId='local',[string]$ExpectedControllerThreadId,[string]$ExpectedControllerHostId='local',[int64]$ExpectedControllerEpoch,[string]$TakeoverReason,
     [ValidateSet('analyst','developer','tester','reviewer')][string]$Role,
@@ -11,7 +11,7 @@ param(
     [string]$ObservedProjectPath,[string]$ObservedStatus,[string]$ObservationPath,[string]$SnapshotPath,
     [ValidateSet('dispatch_send','callback_ack')][string]$ExternalActionType,[string]$ExternalActionId,[string]$EvidencePath,
     [string]$PlanPath,[string]$ActionId,[string]$ExecutionId,[int]$LeaseSeconds=300,[string]$ErrorMessage,[ValidateSet('abandoned','reconciled')][string]$Resolution,
-    [string]$BindingPath
+    [string]$BindingPath,[string]$GitRequestPath,[string]$GitReceiptPath
 )
 
 $ErrorActionPreference = 'Stop'
@@ -47,6 +47,7 @@ switch ($Action) {
     'record-callback-ack' { if(-not $TaskId -or -not $CallbackEventId -or -not $ReceiptPath -or -not $ExternalActionId){throw 'TaskId, CallbackEventId, ReceiptPath, and ExternalActionId are required.'};Confirm-WorkflowCallbackAcknowledged -ProjectPath $ProjectPath -TaskId $TaskId -CallbackEventId $CallbackEventId -ReceiptPath $ReceiptPath -ExternalActionId $ExternalActionId }
     'record-result' { if (-not $TaskId -or -not $DispatchId -or -not $ThreadId -or -not $ResultMessageId -or -not $RawResultPath) { throw 'TaskId, DispatchId, ThreadId, ResultMessageId, and RawResultPath are required.' }; Receive-WorkflowResult -ProjectPath $ProjectPath -TaskId $TaskId -DispatchId $DispatchId -ThreadId $ThreadId -ResultMessageId $ResultMessageId -Cursor $Cursor -RawResultPath $RawResultPath }
     'verify-result' { if (-not $TaskId -or -not $NormalizedResultPath) { throw 'TaskId and NormalizedResultPath are required.' }; Confirm-WorkflowResultVerified -ProjectPath $ProjectPath -TaskId $TaskId -NormalizedResultPath $NormalizedResultPath | ConvertTo-Json -Depth 20 }
+    'controlled-git' { if(-not $GitRequestPath -or -not $GitReceiptPath){throw 'GitRequestPath and GitReceiptPath are required.'};& (Join-Path $PSScriptRoot 'controlled-git.ps1') -RequestPath $GitRequestPath -ReceiptPath $GitReceiptPath }
     'reconcile' { if (-not $TaskId) { throw 'TaskId is required.' }; Get-WorkflowReconciliation -ProjectPath $ProjectPath -TaskId $TaskId | ConvertTo-Json -Depth 20 }
     'show' { Get-WorkflowState -ProjectPath $ProjectPath | ConvertTo-Json -Depth 20 }
     'audit' { if (-not (Test-WorkflowStateIntegrity -ProjectPath $ProjectPath)) { throw 'Integrity audit failed.' } }
