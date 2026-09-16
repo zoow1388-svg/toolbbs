@@ -23,7 +23,9 @@
 
 ## 状态模型
 
-`draft → awaiting_approval → approved → dispatched → running → verifying → completed`
+普通任务：`draft → awaiting_approval → approved → dispatched → running → verifying → completed`
+
+开发任务受控提交：`running → awaiting_commit → verifying → completed`。其中 Git 子状态独立记录为 `not-started → worktree-ready → changes-ready → staged → committed → merged`，用于恢复中断操作，不能替代任务结果验证和回传 ACK。
 
 任意阶段可以进入 `blocked`、`failed`、`cancelled` 或 `stale`。终止状态不得自动恢复；恢复必须重新核对外部实际状态。
 
@@ -134,6 +136,14 @@ Codex 桌面宿主运行时已经真实验证可以唤醒等待或 idle 的任�
 过期或旧任期认领可以在独立证据支持下进入 `abandoned` 或 `reconciled`。前者表示确认没有产生效果并允许新尝试，后者表示效果已由外部状态证明；活动租约不能被解除。失败执行保留原始失败证据，另行保存用户重试授权和原因消除证据后进入 `retry_authorized`。
 
 每个逻辑操作的尝试号严格递增。计划器把活动认领、可解决认领和失败执行分别映射为检查、证据化解决和请求重试授权。通用恢复层不得覆盖外部发送事务的判断，避免重新打开 v1.2 已关闭的重复投递窗口。
+
+## v1.9.0 Git 生命周期自动联动
+
+工作流配置保存 D 盘工作树根目录和目标分支。计划器为已批准的开发任务生成不可变工作树请求，执行回执成功后自动绑定工作树。开发任务不得自行暂存或提交；其交接文件必须精确列出修改文件，总控同时读取 Git 实际状态并与 `allowed_files` 做集合比对，匹配后才进入 `awaiting_commit`。
+
+暂存、提交和合并均复用 `git-actions.json` 事务账本。提交完成时记录开发分支真实提交哈希；修订发布动作只允许更新依赖该开发任务、尚未派发且没有旧工作树绑定的测试或审查任务。测试和审查结果仍通过原有规范化与可信验证链路，合并请求生成器要求两份证据均为 `trusted + passed`，且 `inspected_revision` 与开发提交完全一致。
+
+合并回执单独记录目标分支的 `merge_revision`。提交修订与合并修订不混用，便于测试证据追溯和中断恢复。任何基线漂移、脏工作区、越权文件、证据变化、缺少授权或冲突都会关闭门禁。远程推送、强制操作、冲突解决、工作树和分支删除仍是独立授权边界。
 
 ## v1.8.0 Git 事务编排与安装交付
 

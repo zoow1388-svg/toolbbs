@@ -77,6 +77,19 @@ function New-WorkflowActionPlan {
             Add-Action 'manual_review' @($task.task_id) 'inspect_task' ([ordered]@{task_id=$task.task_id;status=$task.status}) @('current task state','blocking evidence') $false $null 'Terminal or exceptional state requires inspection.'
             continue
         }
+        if($task.status-eq'awaiting_commit'){
+            if($task.git_phase-eq'changes-ready'){$requestPath=Join-Path $stateDirectory "git-requests\$($task.task_id)-stage.json";Add-Action 'controlled_git' @($task.task_id) 'manage-workflow:prepare-git-request' ([ordered]@{task_id=$task.task_id;git_operation='stage';request_path=$requestPath;expected_controller_epoch=[int64]$workflow.controller_epoch}) @('verified development handoff','immutable stage request') $true 'git-approved' 'Authorized developer changes are ready for controlled staging.'}
+            elseif($task.git_phase-eq'staged'){$requestPath=Join-Path $stateDirectory "git-requests\$($task.task_id)-commit.json";Add-Action 'controlled_git' @($task.task_id) 'manage-workflow:prepare-git-request' ([ordered]@{task_id=$task.task_id;git_operation='commit';request_path=$requestPath;expected_controller_epoch=[int64]$workflow.controller_epoch}) @('staged authorized files','immutable commit request') $true 'git-approved' 'Staged developer changes are ready for controlled commit.'}
+            elseif($task.git_phase-eq'committed'){
+                $pendingTargets=@($tasks|Where-Object{$_.role-in@('tester','reviewer')-and$_.status-eq'approved'-and$_.delivery_status-eq'not-prepared'-and$_.depends_on-contains$task.task_id-and$_.base_revision-ne$task.commit_revision})
+                foreach($target in $pendingTargets){Add-Action 'publish_revision' @($task.task_id,$target.task_id) 'manage-workflow:publish-verification-revision' ([ordered]@{task_id=$target.task_id;developer_task_id=$task.task_id;commit_revision=$task.commit_revision}) @('controlled commit receipt','unchanged verification task scope') $true $null 'Publish the immutable developer commit to an undispatched verification task.'}
+                $gates=@($tasks|Where-Object{$_.role-in@('tester','reviewer')-and$_.status-eq'completed'-and$_.verified-and$_.verification_status-eq'trusted'-and$_.depends_on-contains$task.task_id})
+                if(@($gates|Where-Object{$_.role-eq'tester'}).Count-eq1-and@($gates|Where-Object{$_.role-eq'reviewer'}).Count-eq1){$requestPath=Join-Path $stateDirectory "git-requests\$($task.task_id)-merge.json";Add-Action 'controlled_git' @($task.task_id) 'manage-workflow:prepare-git-request' ([ordered]@{task_id=$task.task_id;git_operation='merge';request_path=$requestPath;expected_controller_epoch=[int64]$workflow.controller_epoch}) @('trusted tester evidence','trusted reviewer evidence','immutable merge request') $true 'git-approved' 'The exact developer commit passed both gates and is ready for an authorized controlled merge.'}
+                else{Add-Action 'manual_review' @($task.task_id) 'resume_developer_result' ([ordered]@{task_id=$task.task_id;commit_revision=$task.commit_revision}) @('developer final result bound to commit') $false $null 'Controlled commit completed; testing and review must inspect this exact revision.'}
+            }
+            elseif($task.git_phase-eq'merged'){Add-Action 'manual_review' @($task.task_id) 'finalize_merged_development' ([ordered]@{task_id=$task.task_id;commit_revision=$task.commit_revision;merge_revision=$task.merge_revision}) @('merge receipt','trusted tester evidence','trusted reviewer evidence') $false $null 'Controlled merge completed without push; finalize workflow delivery.'}
+            continue
+        }
         if($task.status -eq 'completed'){
             if(-not $task.verified -or $task.verification_status -ne 'trusted'){
                 Add-Action 'manual_review' @($task.task_id) 'inspect_legacy_result' ([ordered]@{task_id=$task.task_id;verification_status=$task.verification_status}) @('trusted verification receipt') $false $null 'Completed history is not trusted for dependency release.'
@@ -90,6 +103,12 @@ function New-WorkflowActionPlan {
         if($task.status -eq 'approved' -and $task.delivery_status -eq 'not-prepared'){
             if([string]::IsNullOrWhiteSpace([string]$workflow.controller_thread_id) -or [string]::IsNullOrWhiteSpace([string]$workflow.controller_host_id)){
                 Add-Action 'manual_review' @($task.task_id) 'configure_controller' ([ordered]@{task_id=$task.task_id}) @('controller thread ID','controller host ID') $false 'explicit-user-direction' 'Active callback requires an immutable controller identity before dispatch.'
+                continue
+            }
+            if($task.role-eq'developer'-and[string]::IsNullOrWhiteSpace([string]$task.worktree_path)){
+                if($task.authorization-ne'git-approved'){Add-Action 'request_authorization' @($task.task_id) 'request_git_authorization' ([ordered]@{task_id=$task.task_id;requested_authorization='git-approved'}) @('explicit Git approval') $false 'git-approved' 'Automatic worktree creation requires explicit Git authorization.'}
+                elseif([string]::IsNullOrWhiteSpace([string]$workflow.git_worktree_root)){Add-Action 'manual_review' @($task.task_id) 'configure_git_worktree_root' ([ordered]@{task_id=$task.task_id}) @('D drive worktree root') $false 'explicit-user-direction' 'Automatic worktree creation requires a configured D drive root.'}
+                else{$requestPath=Join-Path $stateDirectory "git-requests\$($task.task_id)-create-worktree.json";Add-Action 'controlled_git' @($task.task_id) 'manage-workflow:prepare-git-request' ([ordered]@{task_id=$task.task_id;request_path=$requestPath;expected_controller_epoch=[int64]$workflow.controller_epoch}) @('immutable generated request','journaled Git transaction') $true 'git-approved' 'Approved developer task requires an isolated worktree before dispatch.'}
                 continue
             }
             $dependencies=@($task.depends_on|ForEach-Object{$id=$_;@($tasks|Where-Object{$_.task_id -eq $id})[0]})

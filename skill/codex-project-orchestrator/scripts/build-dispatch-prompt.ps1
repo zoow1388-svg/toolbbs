@@ -41,7 +41,7 @@ $lines.Add('- 只在授权与文件范围内执行；需要扩大范围时立即
 $lines.Add('- 不提交、不推送、不部署，除非任务中有对应独立授权。')
 $lines.Add('- 回报必须原样包含任务编号、派发编号、实际命令、退出码、修改、测试、未执行项、阻塞和风险。')
 $criterionByRole=@{analyst='plan_ready';developer='implementation_complete';tester='tests_executed';reviewer='code_review_complete'}
-$roleRuleByRole=@{analyst='只读形成可实施方案，不修改产品文件。';developer='只修改 allowed_files，报告实际变更文件和验证结果。';tester='针对派发修订执行真实测试，不修改产品文件。';reviewer='针对同一修订独立审查，存在未解决发现时不得报告 passed。'}
+$roleRuleByRole=@{analyst='只读形成可实施方案，不修改产品文件。';developer='只修改 allowed_files；不要执行 git add 或 git commit；完成后生成 development-handoff.json，准确报告实际变更文件。';tester='针对派发修订执行真实测试，不修改产品文件。';reviewer='针对同一修订独立审查，存在未解决发现时不得报告 passed。'}
 $lines.Add("- 角色门槛：$($roleRuleByRole[[string]$dispatch.role])")
 $lines.Add("- 规范化结果必须包含 stage_evidence：role=$($dispatch.role)、outcome、inspected_revision、criteria（含 $($criterionByRole[[string]$dispatch.role])）和 findings。")
 $callbackBody=[ordered]@{type='completion_callback';event_id=$dispatch.callback.event_id;workflow_id=$dispatch.workflow_id;task_id=$dispatch.task_id;dispatch_id=$dispatch.dispatch_id;source_thread_id=$dispatch.thread_id;source_host_id=$dispatch.host_id;target_thread_id=$dispatch.callback.target_thread_id;target_host_id=$dispatch.callback.target_host_id;status=$dispatch.callback.status}|ConvertTo-Json -Compress

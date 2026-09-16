@@ -7,7 +7,8 @@ $script:Transitions = @{
     awaiting_approval = @('approved','blocked','failed','cancelled','stale')
     approved = @('dispatched','blocked','failed','cancelled','stale')
     dispatched = @('running','blocked','failed','cancelled','stale')
-    running = @('verifying','blocked','failed','cancelled','stale')
+    running = @('awaiting_commit','verifying','blocked','failed','cancelled','stale')
+    awaiting_commit = @('verifying','blocked','failed','cancelled','stale')
     verifying = @('completed','blocked','failed','cancelled','stale')
 }
 
@@ -86,7 +87,11 @@ function Add-Defaults {
     }
     if($Workflow.PSObject.Properties.Match('controller_epoch').Count -eq 0){Add-Member -InputObject $Workflow -NotePropertyName controller_epoch -NotePropertyValue $(if([string]::IsNullOrWhiteSpace([string]$Workflow.controller_thread_id)){0}else{1})}
     if($Workflow.PSObject.Properties.Match('controller_history').Count -eq 0){Add-Member -InputObject $Workflow -NotePropertyName controller_history -NotePropertyValue @()}
+    if($Workflow.PSObject.Properties.Match('git_worktree_root').Count -eq 0){Add-Member -InputObject $Workflow -NotePropertyName git_worktree_root -NotePropertyValue $null}
+    if($Workflow.PSObject.Properties.Match('git_target_branch').Count -eq 0){Add-Member -InputObject $Workflow -NotePropertyName git_target_branch -NotePropertyValue 'main'}
     foreach ($task in $Tasks) {
+        if($task.PSObject.Properties.Match('git_phase').Count -eq 0){Add-Member -InputObject $task -NotePropertyName git_phase -NotePropertyValue $(if($task.worktree_path){'worktree-ready'}else{'not-started'})}
+        foreach($name in @('development_handoff_path','development_handoff_sha256','commit_revision','merge_revision')){if($task.PSObject.Properties.Match($name).Count -eq 0){Add-Member -InputObject $task -NotePropertyName $name -NotePropertyValue $null}}
         foreach($name in @('worktree_mode','worktree_binding_path','worktree_binding_sha256','worktree_path','branch_name','worktree_head_revision','worktree_is_detached','worktree_bound_at')){
             if($task.PSObject.Properties.Match($name).Count -eq 0){Add-Member -InputObject $task -NotePropertyName $name -NotePropertyValue $null}
         }
@@ -120,7 +125,7 @@ function Add-Defaults {
             Add-Member -InputObject $task -NotePropertyName verification_status -NotePropertyValue $verificationStatus
         }
     }
-    if ([int]$Workflow.state_version -lt 17) { $Workflow.state_version = 17 }
+    if ([int]$Workflow.state_version -lt 18) { $Workflow.state_version = 18 }
 }
 
 function Get-LiveWorktreeIdentity {
@@ -155,7 +160,7 @@ function Initialize-WorkflowState {
         $workflowPath = Join-Path $state 'workflow.json'
         if (Test-Path -LiteralPath $workflowPath) { throw 'Workflow already exists.' }
         $now = Get-UtcTimestamp
-        $workflow = [ordered]@{ workflow_id=$WorkflowId; project_path=$resolved; state_version=17; controller_thread_id=$(if([string]::IsNullOrWhiteSpace($ControllerThreadId)){$null}else{$ControllerThreadId}); controller_host_id=$(if([string]::IsNullOrWhiteSpace($ControllerThreadId)){$null}else{$ControllerHostId}); controller_epoch=$(if([string]::IsNullOrWhiteSpace($ControllerThreadId)){0}else{1}); controller_history=@(); status='draft'; current_stage='analysis'; authorization='read-only'; event_sequence=0; created_at=$now; updated_at=$now }
+        $workflow = [ordered]@{ workflow_id=$WorkflowId; project_path=$resolved; state_version=18; controller_thread_id=$(if([string]::IsNullOrWhiteSpace($ControllerThreadId)){$null}else{$ControllerThreadId}); controller_host_id=$(if([string]::IsNullOrWhiteSpace($ControllerThreadId)){$null}else{$ControllerHostId}); controller_epoch=$(if([string]::IsNullOrWhiteSpace($ControllerThreadId)){0}else{1}); controller_history=@(); git_worktree_root=$null; git_target_branch='main'; status='draft'; current_stage='analysis'; authorization='read-only'; event_sequence=0; created_at=$now; updated_at=$now }
         $tasks = @()
         Write-Event $state $workflow 'workflow_initialized' $null $null 'draft' 'initialization'
         Write-JsonAtomic $workflow $workflowPath
@@ -163,6 +168,42 @@ function Initialize-WorkflowState {
         Write-JsonAtomic @() (Join-Path $state 'external-actions.json')
         Write-JsonAtomic @() (Join-Path $state 'action-executions.json')
         Write-JsonAtomic @() (Join-Path $state 'git-actions.json')
+    }
+}
+
+function Set-WorkflowGitConfiguration {
+    param([string]$ProjectPath,[string]$WorktreeRoot,[string]$TargetBranch='main')
+    $state=Join-Path ([IO.Path]::GetFullPath($ProjectPath)) '.codex-orchestrator';Invoke-WithStateLock $state {
+        $workflowPath=Join-Path $state 'workflow.json';$tasksPath=Join-Path $state 'tasks.json';$workflow=Read-StateJson $workflowPath;$tasks=@(Read-StateJson $tasksPath|ForEach-Object{$_});Add-Defaults $workflow $tasks
+        $root=[IO.Path]::GetFullPath($WorktreeRoot);if(-not$root.StartsWith('D:\',[StringComparison]::OrdinalIgnoreCase)){throw 'WorktreeRoot must be on D drive.'};if($root -notmatch '^[\x00-\x7F]+$'){throw 'WorktreeRoot must use an ASCII-only path for Windows PowerShell compatibility.'};if([string]::IsNullOrWhiteSpace($TargetBranch)){throw 'TargetBranch is required.'}
+        $workflow.git_worktree_root=$root;$workflow.git_target_branch=$TargetBranch;$workflow.updated_at=Get-UtcTimestamp;Write-Event $state $workflow 'git_configuration_set' $null $null $TargetBranch $root;Write-JsonAtomic $workflow $workflowPath;Write-JsonAtomic $tasks $tasksPath;$workflow
+    }
+}
+
+function Receive-DevelopmentHandoff {
+    param([string]$ProjectPath,[string]$TaskId,[string]$HandoffPath)
+    $state=Join-Path ([IO.Path]::GetFullPath($ProjectPath)) '.codex-orchestrator';Invoke-WithStateLock $state {
+        $workflowPath=Join-Path $state 'workflow.json';$tasksPath=Join-Path $state 'tasks.json';$workflow=Read-StateJson $workflowPath;$tasks=@(Read-StateJson $tasksPath|ForEach-Object{$_});Add-Defaults $workflow $tasks
+        $found=@($tasks|Where-Object{$_.task_id-eq$TaskId});if($found.Count-ne1){throw 'Task not found.'};$task=$found[0];if($task.role-ne'developer'-or$task.status-ne'running'-or[string]::IsNullOrWhiteSpace([string]$task.worktree_path)){throw 'Developer task is not ready for commit handoff.'}
+        $path=[IO.Path]::GetFullPath($HandoffPath);if(-not(Test-Path $path)){throw 'Development handoff not found.'};$handoff=Read-StateJson $path
+        $propertyNames=@($handoff.PSObject.Properties.Name|Sort-Object);$expectedNames=@('base_revision','changed_files','created_at','summary','task_id'|Sort-Object)
+        if(($propertyNames-join'|')-ne($expectedNames-join'|')-or[string]::IsNullOrWhiteSpace([string]$handoff.summary)-or[string]::IsNullOrWhiteSpace([string]$handoff.created_at)){throw 'Development handoff does not match the required contract.'}
+        if($handoff.task_id-ne$task.task_id-or$handoff.base_revision-ne$task.base_revision){throw 'Development handoff identity mismatch.'}
+        $actual=@(&git -C $task.worktree_path status --porcelain=v1 --untracked-files=all|Where-Object{$_}|ForEach-Object{([string]$_).Substring(3).Trim()}|Sort-Object -Unique);if($LASTEXITCODE-ne0-or-not$actual.Count){throw 'Developer worktree has no changes.'};$reported=@($handoff.changed_files|Sort-Object -Unique)
+        if(($actual-join'|')-ne($reported-join'|')){throw 'Development handoff changed files do not match worktree.'};$outside=@($actual|Where-Object{$_-notin@($task.allowed_files)});if($outside.Count){throw "Development changes exceed authorization: $($outside-join', ')"}
+        $task.development_handoff_path=$path;$task.development_handoff_sha256=(Get-FileHash $path -Algorithm SHA256).Hash.ToLowerInvariant();$task.git_phase='changes-ready';$task.status='awaiting_commit';$task.updated_at=Get-UtcTimestamp;Write-Event $state $workflow 'development_handoff_received' $TaskId 'running' 'awaiting_commit' $task.development_handoff_sha256;$workflow.updated_at=Get-UtcTimestamp;Write-JsonAtomic $workflow $workflowPath;Write-JsonAtomic $tasks $tasksPath;$task
+    }
+}
+
+function Set-WorkflowVerificationRevision {
+    param([string]$ProjectPath,[string]$TaskId,[string]$DeveloperTaskId)
+    $state=Join-Path ([IO.Path]::GetFullPath($ProjectPath)) '.codex-orchestrator';Invoke-WithStateLock $state {
+        $workflowPath=Join-Path $state 'workflow.json';$tasksPath=Join-Path $state 'tasks.json';$workflow=Read-StateJson $workflowPath;$tasks=@(Read-StateJson $tasksPath|ForEach-Object{$_});Add-Defaults $workflow $tasks
+        $target=@($tasks|Where-Object{$_.task_id-eq$TaskId});$developer=@($tasks|Where-Object{$_.task_id-eq$DeveloperTaskId});if($target.Count-ne1-or$developer.Count-ne1){throw 'Task or developer task not found.'};$target=$target[0];$developer=$developer[0]
+        if($target.role-notin@('tester','reviewer')-or$target.status-ne'approved'-or$target.delivery_status-ne'not-prepared'-or$target.depends_on-notcontains$DeveloperTaskId){throw 'Verification task is not eligible for revision publication.'}
+        if($developer.role-ne'developer'-or$developer.git_phase-ne'committed'-or[string]::IsNullOrWhiteSpace([string]$developer.commit_revision)){throw 'Developer commit is not ready for verification.'}
+        if(-not[string]::IsNullOrWhiteSpace([string]$target.worktree_path)){throw 'Existing verification worktree must be reviewed before changing its revision.'}
+        $from=[string]$target.base_revision;$target.base_revision=$developer.commit_revision;$target.updated_at=Get-UtcTimestamp;Write-Event $state $workflow 'verification_revision_published' $TaskId $from $developer.commit_revision $DeveloperTaskId;$workflow.updated_at=Get-UtcTimestamp;Write-JsonAtomic $workflow $workflowPath;Write-JsonAtomic $tasks $tasksPath;$target
     }
 }
 
@@ -809,4 +850,4 @@ function Get-WorkflowState {
     [ordered]@{workflow=$workflow;tasks=$tasks;external_actions=@(Read-ExternalActions $state);action_executions=@(Read-ActionExecutions $state)}
 }
 
-Export-ModuleMember -Function Initialize-WorkflowState,Set-WorkflowController,Set-WorkflowControllerTakeover,Register-WorkflowTask,Set-WorkflowTaskWorktree,Set-WorkflowTaskState,New-WorkflowDispatch,Start-WorkflowExternalAction,Complete-WorkflowExternalAction,Cancel-WorkflowExternalAction,Claim-WorkflowAction,Renew-WorkflowActionLease,Set-WorkflowActionExecutionResult,Resolve-WorkflowActionExecution,Authorize-WorkflowActionRetry,Confirm-WorkflowDispatchSent,Confirm-WorkflowAcknowledged,Receive-WorkflowCallback,Confirm-WorkflowCallbackAcknowledged,Receive-WorkflowResult,Confirm-WorkflowResultVerified,Record-WorkflowThreadObservation,Record-WorkflowWaitSnapshot,Get-WorkflowReconciliation,Get-WorkflowState,Test-WorkflowStateIntegrity
+Export-ModuleMember -Function Initialize-WorkflowState,Set-WorkflowGitConfiguration,Receive-DevelopmentHandoff,Set-WorkflowVerificationRevision,Set-WorkflowController,Set-WorkflowControllerTakeover,Register-WorkflowTask,Set-WorkflowTaskWorktree,Set-WorkflowTaskState,New-WorkflowDispatch,Start-WorkflowExternalAction,Complete-WorkflowExternalAction,Cancel-WorkflowExternalAction,Claim-WorkflowAction,Renew-WorkflowActionLease,Set-WorkflowActionExecutionResult,Resolve-WorkflowActionExecution,Authorize-WorkflowActionRetry,Confirm-WorkflowDispatchSent,Confirm-WorkflowAcknowledged,Receive-WorkflowCallback,Confirm-WorkflowCallbackAcknowledged,Receive-WorkflowResult,Confirm-WorkflowResultVerified,Record-WorkflowThreadObservation,Record-WorkflowWaitSnapshot,Get-WorkflowReconciliation,Get-WorkflowState,Test-WorkflowStateIntegrity

@@ -9,11 +9,11 @@
 
 ## 安装
 
-1. 从 GitHub Release 下载 `codex-project-orchestrator-v1.8.0.zip` 和对应的 `.sha256` 文件。
+1. 从 GitHub Release 下载 `codex-project-orchestrator-v1.9.0.zip` 和对应的 `.sha256` 文件。
 2. 在文件所在目录验证 SHA-256：
 
 ```powershell
-Get-FileHash -Algorithm SHA256 '.\codex-project-orchestrator-v1.8.0.zip'
+Get-FileHash -Algorithm SHA256 '.\codex-project-orchestrator-v1.9.0.zip'
 ```
 
 3. 确认输出与 `.sha256` 文件中的值一致，然后解压 ZIP。
@@ -40,6 +40,16 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File '.\install.ps1' -AllowUp
 ```
 
 如果安装失败，安装器会自动把旧目录移回原位置。同版本且内容完全一致时，重复运行不会修改任何文件。
+
+从 v1.8.0 升级到 v1.9.0 时，已有项目状态会在下一次受控写入时补充 Git 配置和任务字段。旧的已完成记录不会被伪造为新证据；首次启用自动工作树前，需为目标项目配置明确的 D 盘 ASCII 工作树根目录。升级后先在非生产项目执行一次工作树、交接、暂存、提交、测试和审查流程，再决定是否用于正式项目。
+
+安装完成后可核对版本：
+
+```powershell
+Get-Content '.\codex-project-orchestrator\VERSION'
+```
+
+预期输出为 `1.9.0`。
 
 ## 卸载
 

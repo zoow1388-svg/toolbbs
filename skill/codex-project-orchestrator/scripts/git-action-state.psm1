@@ -37,7 +37,17 @@ function Complete-GitAction {
         if($item.status-eq'completed'){if((Get-Sha $resolved)-ne$item.receipt_sha256){throw 'Completed Git receipt mismatch.'};return $item}
         if($item.status-ne'prepared'){throw 'Only a prepared Git action can complete.'}
         if($receipt.operation_id-ne$item.operation_id-or$receipt.operation-ne$item.operation-or$receipt.request_sha256-ne$item.request_sha256-or$receipt.status-ne'completed'){throw 'Git receipt identity mismatch.'}
-        $item.status='completed';$item.receipt_path=$resolved;$item.receipt_sha256=Get-Sha $resolved;$item.completed_at=[DateTime]::UtcNow.ToString('o');Write-GitJsonAtomic $actions (Join-Path $state 'git-actions.json');$item
+        $item.status='completed';$item.receipt_path=$resolved;$item.receipt_sha256=Get-Sha $resolved;$item.completed_at=[DateTime]::UtcNow.ToString('o')
+        if($item.operation-eq'create_worktree'){
+            $tasksPath=Join-Path $state 'tasks.json';$tasks=@(Get-Content $tasksPath -Raw -Encoding UTF8|ConvertFrom-Json|ForEach-Object{$_});$task=@($tasks|Where-Object{$_.task_id-eq$item.task_id});if($task.Count-ne1){throw 'Git action task not found during worktree binding.'};$task=$task[0]
+            $bindingPath=Join-Path $state "worktrees\$($task.task_id).json";$binding=[ordered]@{mode='developer';repository_root=$receipt.repository_root;worktree_path=$receipt.worktree_path;branch_name=$receipt.branch_name;head_revision=$receipt.end_revision;is_detached=$false;is_dirty=$false;inspected_at=[DateTime]::UtcNow.ToString('o')};Write-GitJsonAtomic $binding $bindingPath
+            $task.git_phase='worktree-ready';$task.worktree_mode='developer';$task.worktree_binding_path=[IO.Path]::GetFullPath($bindingPath);$task.worktree_binding_sha256=Get-Sha $bindingPath;$task.worktree_path=$receipt.worktree_path;$task.branch_name=$receipt.branch_name;$task.worktree_head_revision=$receipt.end_revision;$task.worktree_is_detached=$false;$task.worktree_bound_at=[DateTime]::UtcNow.ToString('o');$task.updated_at=$task.worktree_bound_at;Write-GitJsonAtomic $tasks $tasksPath
+        }elseif($item.operation-in@('stage','commit','merge')){
+            $tasksPath=Join-Path $state 'tasks.json';$tasks=@(Get-Content $tasksPath -Raw -Encoding UTF8|ConvertFrom-Json|ForEach-Object{$_});$task=@($tasks|Where-Object{$_.task_id-eq$item.task_id})[0]
+            if($item.operation-eq'stage'){$task.git_phase='staged'}elseif($item.operation-eq'commit'){$task.git_phase='committed';$task.commit_revision=$receipt.end_revision;$task.worktree_head_revision=$receipt.end_revision}else{$task.git_phase='merged';$task.merge_revision=$receipt.end_revision}
+            $task.updated_at=[DateTime]::UtcNow.ToString('o');Write-GitJsonAtomic $tasks $tasksPath
+        }
+        Write-GitJsonAtomic $actions (Join-Path $state 'git-actions.json');$item
     }
 }
 function Fail-GitAction {
