@@ -2,6 +2,12 @@
 
 这是一个面向 Codex 桌面版的自动化多窗口项目总控 Skill：让一个总控任务通过不可变任务 ID 协调多个 Codex 任务，完成分析、开发、测试、审查、结果回传和中断恢复。项目当前只在 D 盘开发，不会自动安装到全局 Skill 目录。
 
+## v1.9 Git 生命周期自动联动
+
+v1.9 将任务状态和受控 Git 操作串成一条可恢复链路：总控按任务 ID 自动生成 `codex/` 分支和 D 盘工作树请求；开发窗口只修改授权文件并回传 `development-handoff.json`，不自行暂存或提交；总控核对实际修改后进入 `awaiting_commit`，依次生成暂存和中文 Conventional Commit 请求。
+
+提交成功后，总控把不可变提交哈希发布给尚未派发的测试和审查任务。只有两份可信结果都以 `passed` 检查同一个提交，计划器才生成合并请求。合并仍要求 `git-approved`，执行前重新检查目标分支基线、脏工作区、授权文件、证据哈希和冲突；成功后分别保留 `commit_revision` 与 `merge_revision`。系统依旧不会自动推送、强制合并、解决冲突或删除工作树。
+
 ## v1.8 Git 事务编排与恢复
 
 v1.8 将受控 Git 执行接入动作计划。每次操作先通过 `begin-git-action` 保存不可变请求、控制器任期和请求哈希，计划器才生成 `controlled_git` 动作；成功后使用回执完成事务，失败后保存证据并进入人工核查。重复唤醒不会再次执行已经完成或失败的逻辑操作。
@@ -31,7 +37,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File '.\skill\codex-project-o
 
 绑定会核对仓库根目录、工作树路径、分支、HEAD、基线提交和干净状态。两个活动开发任务不得共用工作树或分支。本版本不会自动创建、删除、提交、合并或推送 Git 内容。
 
-## v1.8.0 安装与升级
+## v1.9.0 安装与升级
 
 正式安装包包含 Skill、安装器、可恢复卸载器、文件清单和 SHA-256 校验值。普通用户请按照 [`docs/INSTALL.md`](docs/INSTALL.md) 操作。安装不需要 Python、`jsonschema` 或 PyYAML。
 

@@ -38,6 +38,10 @@ Use `scripts/controlled-git.ps1` only after explicit `git-approved` authorizatio
 - Merge only from a clean target branch at the exact recorded baseline. Require trusted tester and reviewer evidence whose receipt hashes bind to the exact source commit, and perform a conflict preflight before merging.
 - Never push, force, delete a branch/worktree, or resolve conflicts automatically. These remain separate user decisions.
 
+Configure an explicit D-drive ASCII worktree root with `configure-git`. For an approved developer task, generate requests through `prepare-git-request`; do not hand-author requests when the planner can derive them. Require the developer to return an uncommitted `development-handoff.json`, record it with `record-development-handoff`, and let the controller compare the reported files with live Git state before staging.
+
+After the controlled commit, use `publish-verification-revision` to bind its immutable hash only to undispatched tester or reviewer tasks that depend on that developer task. Do not replace an existing verification worktree silently. Generate `merge` only after exactly one trusted tester result and one trusted reviewer result pass against the same commit. Preserve `commit_revision` and `merge_revision` as different identities.
+
 Before running any controlled Git request, register it with `manage-workflow.ps1 -Action begin-git-action`. Execute only the immutable request returned by the matching `controlled_git` action plan entry. After execution, use `complete-git-action` with the receipt. If execution fails, preserve raw evidence with `fail-git-action`; do not retry automatically. A prepared transaction after interruption is treated as possibly executed and must be reconciled from the repository and receipt before any cancellation or replacement attempt.
 
 For a real five-window acceptance, require one controller plus four distinct worker thread IDs. After all callbacks, trusted verifications, tests, and review complete, create a single evidence document and run `scripts/verify-five-window-e2e.ps1`. Do not claim real E2E success from simulated fixtures or unit tests.

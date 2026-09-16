@@ -14,6 +14,8 @@
     "state_version": {"type": "integer", "minimum": 1},
     "current_stage": {"enum": ["analysis", "implementation", "test", "review", "delivery"]},
     "event_sequence": {"type": "integer", "minimum": 0},
+    "git_worktree_root": {"type": ["string", "null"], "pattern": "^D:\\\\[A-Za-z0-9_.\\\\-]+"},
+    "git_target_branch": {"type": "string", "minLength": 1},
     "status": {"enum": ["draft", "awaiting_approval", "approved", "dispatched", "running", "verifying", "completed", "blocked", "failed", "cancelled", "stale"]},
     "authorization": {"enum": ["read-only", "plan-approved", "implementation-approved", "test-approved", "git-approved", "deployment-approved"]},
     "created_at": {"type": "string", "format": "date-time"},

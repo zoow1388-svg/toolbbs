@@ -5,7 +5,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$validStates = @('draft','awaiting_approval','approved','dispatched','running','verifying','completed','blocked','failed','cancelled','stale')
+$validStates = @('draft','awaiting_approval','approved','dispatched','running','awaiting_commit','verifying','completed','blocked','failed','cancelled','stale')
 $validRoles = @('analyst','developer','tester','reviewer')
 $validAuthorizations = @('read-only','plan-approved','implementation-approved','test-approved','git-approved','deployment-approved')
 $errors = [System.Collections.Generic.List[string]]::new()
@@ -60,7 +60,7 @@ foreach ($task in $tasks) {
         if (-not $taskIds.ContainsKey([string]$dependency)) { Add-ValidationError "task[$($task.task_id)] dependency not found: $dependency" }
         elseif ($dependency -eq $task.task_id) { Add-ValidationError "task[$($task.task_id)] cannot depend on itself" }
     }
-    if ($task.status -in @('dispatched','running','verifying','completed')) {
+    if ($task.status -in @('dispatched','running','awaiting_commit','verifying','completed')) {
         foreach ($dependency in @($task.depends_on | Where-Object { $_ })) {
             if ($taskIds.ContainsKey([string]$dependency) -and ($taskIds[[string]$dependency].status -ne 'completed' -or ($taskIds[[string]$dependency].PSObject.Properties.Match('verified').Count -gt 0 -and -not $taskIds[[string]$dependency].verified))) { Add-ValidationError "task[$($task.task_id)] dependency is not verified complete: $dependency" }
         }

@@ -62,6 +62,11 @@ pairs = {
         "resolution_evidence_sha256": None, "error": None, "created_at": "2026-09-16T00:00:00Z",
         "completed_at": None, "failed_at": None, "cancelled_at": None,
     },
+    "development-handoff": {
+        "task_id": "DEV-001", "base_revision": "a" * 40,
+        "changed_files": ["src/app.ps1"], "summary": "Implemented the approved change.",
+        "created_at": "2026-09-16T00:00:00Z",
+    },
     "e2e-run": {
         "workflow_id": "WF-E2E-001",
         "repository_root": "D:\\e2e",
@@ -104,4 +109,4 @@ except jsonschema.ValidationError:
 else:
     raise AssertionError("Object changed_files entry unexpectedly passed validation")
 
-print("SCHEMA VALID: 17 positive, 2 negative")
+print("SCHEMA VALID: 18 positive, 2 negative")
