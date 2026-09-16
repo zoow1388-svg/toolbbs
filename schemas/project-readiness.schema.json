@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "project-readiness.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "project_path", "observed_at", "expires_at", "classification", "recommended_mode", "repository", "state", "worktree", "findings", "summary"],
+  "properties": {
+    "schema_version": {"const": 1}, "project_path": {"type": "string", "pattern": "^[A-Za-z]:\\\\"}, "observed_at": {"type": "string", "format": "date-time"}, "expires_at": {"type": "string", "format": "date-time"},
+    "classification": {"enum": ["compatible", "isolated-only", "read-only", "blocked"]}, "recommended_mode": {"enum": ["full-integration", "isolated-development", "read-only", "blocked"]},
+    "repository": {"type": "object", "additionalProperties": false,
+      "required": ["is_git_repository", "repository_root", "requested_path_is_root", "git_version", "has_commits", "head_revision", "current_branch", "is_detached", "target_branch", "target_branch_exists", "status_lines", "ongoing_operations", "worktree_count", "git_user_name_configured", "git_user_email_configured", "special_features"],
+      "properties": {
+        "is_git_repository": {"type": "boolean"}, "repository_root": {"type": ["string", "null"]}, "requested_path_is_root": {"type": "boolean"}, "git_version": {"type": ["string", "null"]},
+        "has_commits": {"type": "boolean"}, "head_revision": {"type": ["string", "null"], "pattern": "^[a-f0-9]{40,64}$"}, "current_branch": {"type": ["string", "null"]}, "is_detached": {"type": "boolean"},
+        "target_branch": {"type": "string", "minLength": 1}, "target_branch_exists": {"type": "boolean"}, "status_lines": {"type": "array", "items": {"type": "string"}},
+        "ongoing_operations": {"type": "array", "uniqueItems": true, "items": {"enum": ["merge", "rebase", "cherry-pick", "revert", "bisect"]}}, "worktree_count": {"type": "integer", "minimum": 0},
+        "git_user_name_configured": {"type": "boolean"}, "git_user_email_configured": {"type": "boolean"}, "special_features": {"type": "array", "uniqueItems": true, "items": {"enum": ["submodules", "sparse-checkout", "git-lfs"]}}
+      }},
+    "state": {"type": "object", "additionalProperties": false, "required": ["path", "exists", "tracked", "ignored"], "properties": {"path": {"type": ["string", "null"]}, "exists": {"type": "boolean"}, "tracked": {"type": "boolean"}, "ignored": {"type": "boolean"}}},
+    "worktree": {"type": "object", "additionalProperties": false, "required": ["default_root", "exists"], "properties": {"default_root": {"type": ["string", "null"]}, "exists": {"type": "boolean"}}},
+    "findings": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["code", "severity", "message"], "properties": {"code": {"type": "string", "minLength": 1}, "severity": {"enum": ["blocker", "warning", "info"]}, "message": {"type": "string", "minLength": 1}}}},
+    "summary": {"type": "object", "additionalProperties": false, "required": ["blockers", "warnings"], "properties": {"blockers": {"type": "integer", "minimum": 0}, "warnings": {"type": "integer", "minimum": 0}}}
+  }
+}

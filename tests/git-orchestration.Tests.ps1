@@ -10,7 +10,8 @@ Describe 'v1.9 Git lifecycle orchestration' {
         & git -C $project init -b main|Out-Null;& git -C $project config user.name test;& git -C $project config user.email test@example.invalid
         Set-Content (Join-Path $project 'README.md') 'base';Set-Content (Join-Path $project '.gitignore') '.codex-orchestrator/';& git -C $project add README.md .gitignore;& git -C $project commit -m baseline|Out-Null
         $base=(& git -C $project rev-parse HEAD).Trim();$worktree=Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
-        &$manager -Action initialize -ProjectPath $project -WorkflowId WF-GIT -ControllerThreadId controller|Out-Null
+        $preflight=Join-Path $TestDrive "$([guid]::NewGuid().ToString('N'))-readiness.json";&$manager -Action preflight -ProjectPath $project|Set-Content -LiteralPath $preflight -Encoding UTF8
+        &$manager -Action initialize -ProjectPath $project -WorkflowId WF-GIT -ControllerThreadId controller -PreflightPath $preflight|Out-Null
         &$manager -Action register -ProjectPath $project -TaskId ANALYSIS-001 -ThreadId analyst -Role analyst -Objective analyze -Authorization plan-approved -BaseRevision $base|Out-Null
         &$manager -Action register -ProjectPath $project -TaskId DEV-001 -ThreadId developer -Role developer -Objective develop -Authorization git-approved -BaseRevision $base -AllowedFiles README.md -DependsOn ANALYSIS-001|Out-Null
         &$manager -Action transition -ProjectPath $project -TaskId DEV-001 -ToStatus awaiting_approval -Reason plan|Out-Null

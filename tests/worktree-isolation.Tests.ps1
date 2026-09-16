@@ -16,14 +16,17 @@ Describe 'v1.5 Git worktree isolation' {
         & git -C $repository config user.name 'Codex Test' | Out-Null
         & git -C $repository config user.email 'codex-test@example.invalid' | Out-Null
         [IO.File]::WriteAllText((Join-Path $repository 'baseline.txt'),'baseline',[Text.UTF8Encoding]::new($false))
-        & git -C $repository add baseline.txt
+        [IO.File]::WriteAllText((Join-Path $repository '.gitignore'),'.codex-orchestrator/',[Text.UTF8Encoding]::new($false))
+        & git -C $repository add baseline.txt .gitignore
         & git -C $repository commit -m baseline | Out-Null
         $baseRevision = (& git -C $repository rev-parse HEAD).Trim()
+        $preflight=Join-Path $caseRoot 'readiness.json'
+        & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $manager -Action preflight -ProjectPath $repository -TargetBranch master | Set-Content -LiteralPath $preflight -Encoding UTF8
+        Invoke-WorktreeManager @('-Action','initialize','-ProjectPath',$repository,'-WorkflowId','WF-WORKTREE','-ControllerThreadId','controller-1','-TargetBranch','master','-PreflightPath',$preflight) | Should Be 0
         & git -C $repository worktree add -b codex/dev-001 $worktree $baseRevision | Out-Null
         $binding = Join-Path $repository 'binding.json'
         & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $inspector -WorktreePath $worktree -OutputPath $binding | Out-Null
         $LASTEXITCODE | Should Be 0
-        Invoke-WorktreeManager @('-Action','initialize','-ProjectPath',$repository,'-WorkflowId','WF-WORKTREE','-ControllerThreadId','controller-1') | Should Be 0
         Invoke-WorktreeManager @('-Action','register','-ProjectPath',$repository,'-TaskId','ANALYSIS-001','-ThreadId','thread-analysis','-Role','analyst','-Objective','analyze','-BaseRevision',$baseRevision) | Should Be 0
     }
 

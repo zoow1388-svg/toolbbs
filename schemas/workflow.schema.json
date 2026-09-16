@@ -16,6 +16,12 @@
     "event_sequence": {"type": "integer", "minimum": 0},
     "git_worktree_root": {"type": ["string", "null"], "pattern": "^[A-Za-z]:\\\\"},
     "git_target_branch": {"type": "string", "minLength": 1},
+    "project_readiness": {"type": ["object", "null"], "additionalProperties": false, "required": ["report_path", "report_sha256", "observed_at", "expires_at", "verified_at", "classification", "repository_root", "head_revision", "current_branch", "target_branch"], "properties": {
+      "report_path": {"type": "string", "pattern": "^[A-Za-z]:\\\\"}, "report_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+      "observed_at": {"type": "string", "format": "date-time"}, "expires_at": {"type": "string", "format": "date-time"}, "verified_at": {"type": "string", "format": "date-time"},
+      "classification": {"const": "compatible"}, "repository_root": {"type": "string", "pattern": "^[A-Za-z]:\\\\"}, "head_revision": {"type": "string", "pattern": "^[a-f0-9]{40,64}$"},
+      "current_branch": {"type": "string", "minLength": 1}, "target_branch": {"type": "string", "minLength": 1}
+    }},
     "status": {"enum": ["draft", "awaiting_approval", "approved", "dispatched", "running", "verifying", "completed", "blocked", "failed", "cancelled", "stale"]},
     "authorization": {"enum": ["read-only", "plan-approved", "implementation-approved", "test-approved", "git-approved", "deployment-approved"]},
     "created_at": {"type": "string", "format": "date-time"},

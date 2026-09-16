@@ -103,6 +103,7 @@ function Add-Defaults {
     if($Workflow.PSObject.Properties.Match('controller_history').Count -eq 0){Add-Member -InputObject $Workflow -NotePropertyName controller_history -NotePropertyValue @()}
     if($Workflow.PSObject.Properties.Match('git_worktree_root').Count -eq 0){Add-Member -InputObject $Workflow -NotePropertyName git_worktree_root -NotePropertyValue (Get-DefaultGitWorktreeRoot $Workflow.project_path)}elseif([string]::IsNullOrWhiteSpace([string]$Workflow.git_worktree_root)){$Workflow.git_worktree_root=Get-DefaultGitWorktreeRoot $Workflow.project_path}
     if($Workflow.PSObject.Properties.Match('git_target_branch').Count -eq 0){Add-Member -InputObject $Workflow -NotePropertyName git_target_branch -NotePropertyValue 'main'}
+    if($Workflow.PSObject.Properties.Match('project_readiness').Count -eq 0){Add-Member -InputObject $Workflow -NotePropertyName project_readiness -NotePropertyValue $null}
     foreach ($task in $Tasks) {
         if($task.PSObject.Properties.Match('git_phase').Count -eq 0){Add-Member -InputObject $task -NotePropertyName git_phase -NotePropertyValue $(if($task.worktree_path){'worktree-ready'}else{'not-started'})}
         foreach($name in @('development_handoff_path','development_handoff_sha256','commit_revision','merge_revision')){if($task.PSObject.Properties.Match($name).Count -eq 0){Add-Member -InputObject $task -NotePropertyName $name -NotePropertyValue $null}}
@@ -139,7 +140,7 @@ function Add-Defaults {
             Add-Member -InputObject $task -NotePropertyName verification_status -NotePropertyValue $verificationStatus
         }
     }
-    if ([int]$Workflow.state_version -lt 19) { $Workflow.state_version = 19 }
+    if ([int]$Workflow.state_version -lt 20) { $Workflow.state_version = 20 }
 }
 
 function Get-LiveWorktreeIdentity {
@@ -167,14 +168,15 @@ function Write-Event {
 }
 
 function Initialize-WorkflowState {
-    param([string]$ProjectPath,[string]$WorkflowId,[string]$ControllerThreadId,[string]$ControllerHostId='local')
+    param([string]$ProjectPath,[string]$WorkflowId,[string]$ControllerThreadId,[string]$ControllerHostId='local',[string]$TargetBranch='main',$PreflightEvidence)
     $resolved = [System.IO.Path]::GetFullPath($ProjectPath)
     $state = Join-Path $resolved '.codex-orchestrator'
     Invoke-WithStateLock $state {
         $workflowPath = Join-Path $state 'workflow.json'
         if (Test-Path -LiteralPath $workflowPath) { throw 'Workflow already exists.' }
         $now = Get-UtcTimestamp
-        $workflow = [ordered]@{ workflow_id=$WorkflowId; project_path=$resolved; state_version=19; controller_thread_id=$(if([string]::IsNullOrWhiteSpace($ControllerThreadId)){$null}else{$ControllerThreadId}); controller_host_id=$(if([string]::IsNullOrWhiteSpace($ControllerThreadId)){$null}else{$ControllerHostId}); controller_epoch=$(if([string]::IsNullOrWhiteSpace($ControllerThreadId)){0}else{1}); controller_history=@(); git_worktree_root=(Get-DefaultGitWorktreeRoot $resolved); git_target_branch='main'; status='draft'; current_stage='analysis'; authorization='read-only'; event_sequence=0; created_at=$now; updated_at=$now }
+        $readiness=$(if($null-eq$PreflightEvidence){$null}else{[ordered]@{report_path=[string]$PreflightEvidence.report_path;report_sha256=[string]$PreflightEvidence.report_sha256;observed_at=[string]$PreflightEvidence.observed_at;expires_at=[string]$PreflightEvidence.expires_at;verified_at=[string]$PreflightEvidence.verified_at;classification=[string]$PreflightEvidence.classification;repository_root=[string]$PreflightEvidence.repository_root;head_revision=[string]$PreflightEvidence.head_revision;current_branch=[string]$PreflightEvidence.current_branch;target_branch=[string]$PreflightEvidence.target_branch}})
+        $workflow = [ordered]@{ workflow_id=$WorkflowId; project_path=$resolved; state_version=20; controller_thread_id=$(if([string]::IsNullOrWhiteSpace($ControllerThreadId)){$null}else{$ControllerThreadId}); controller_host_id=$(if([string]::IsNullOrWhiteSpace($ControllerThreadId)){$null}else{$ControllerHostId}); controller_epoch=$(if([string]::IsNullOrWhiteSpace($ControllerThreadId)){0}else{1}); controller_history=@(); git_worktree_root=(Get-DefaultGitWorktreeRoot $resolved); git_target_branch=$TargetBranch; project_readiness=$readiness; status='draft'; current_stage='analysis'; authorization='read-only'; event_sequence=0; created_at=$now; updated_at=$now }
         $tasks = @()
         Write-Event $state $workflow 'workflow_initialized' $null $null 'draft' 'initialization'
         Write-JsonAtomic $workflow $workflowPath

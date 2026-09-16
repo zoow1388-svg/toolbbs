@@ -9,7 +9,7 @@ Coordinate Codex tasks through supported task tools. Never use window titles, mo
 
 ## Required workflow
 
-1. Resolve the exact project path and keep all state inside that project.
+1. Resolve the exact project path. For an existing Git project, save the output of `manage-workflow.ps1 -Action preflight` outside the target project and pass it back to `initialize` through `-PreflightPath` within 15 minutes. Proceed only when the report and live recheck are both `compatible`. Do not create state, branches, worktrees, or ignore rules during preflight.
 2. Read the project structure, instructions, documentation, Git status, relevant code, tests, and logs before planning changes.
 3. List Codex tasks and register each task by immutable task ID, host ID, project path, role, and Git baseline.
 4. After the user authorizes state-file creation, use `scripts/manage-workflow.ps1` to initialize and mutate `.codex-orchestrator/`; do not hand-edit live state.
@@ -79,3 +79,5 @@ Register a repair with a new task ID and `-RepairOf`. Preserve its source role, 
 ## State placement
 
 Keep source development and target-project state off the system drive when the user requires it. Store per-project runtime state in `<project>/.codex-orchestrator/`. Recommend ignoring runtime state in Git unless the user explicitly wants it versioned.
+
+The v1.10 preflight reports `compatible`, `isolated-only`, `read-only`, or `blocked`. Initialize only after presenting the findings and obtaining separate state-write authorization. Never claim `.codex-orchestrator/` is ignored unless `git check-ignore` proves it; changing `.gitignore` or `.git/info/exclude` requires separate authorization.

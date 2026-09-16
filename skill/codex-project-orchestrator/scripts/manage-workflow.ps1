@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory=$true)][ValidateSet('initialize','configure-git','prepare-git-request','record-development-handoff','publish-verification-revision','configure-controller','takeover-controller','register','bind-worktree','transition','prepare-dispatch','claim-action','renew-action','complete-action','fail-action','resolve-action','authorize-action-retry','begin-external-action','complete-external-action','cancel-external-action','begin-git-action','complete-git-action','fail-git-action','cancel-git-action','record-sent','record-observation','record-wait','record-ack','record-callback','record-callback-ack','record-result','verify-result','controlled-git','reconcile','show','audit')][string]$Action,
+    [Parameter(Mandatory=$true)][ValidateSet('preflight','initialize','configure-git','prepare-git-request','record-development-handoff','publish-verification-revision','configure-controller','takeover-controller','register','bind-worktree','transition','prepare-dispatch','claim-action','renew-action','complete-action','fail-action','resolve-action','authorize-action-retry','begin-external-action','complete-external-action','cancel-external-action','begin-git-action','complete-git-action','fail-git-action','cancel-git-action','record-sent','record-observation','record-wait','record-ack','record-callback','record-callback-ack','record-result','verify-result','controlled-git','reconcile','show','audit')][string]$Action,
     [Parameter(Mandatory=$true)][string]$ProjectPath,
     [string]$WorkflowId,[string]$TaskId,[string]$ThreadId,[string]$HostId='local',[string]$ControllerThreadId,[string]$ControllerHostId='local',[string]$ExpectedControllerThreadId,[string]$ExpectedControllerHostId='local',[int64]$ExpectedControllerEpoch,[string]$TakeoverReason,
     [ValidateSet('analyst','developer','tester','reviewer')][string]$Role,
@@ -11,15 +11,31 @@ param(
     [string]$ObservedProjectPath,[string]$ObservedStatus,[string]$ObservationPath,[string]$SnapshotPath,
     [ValidateSet('dispatch_send','callback_ack')][string]$ExternalActionType,[string]$ExternalActionId,[string]$EvidencePath,
     [string]$PlanPath,[string]$ActionId,[string]$ExecutionId,[int]$LeaseSeconds=300,[string]$ErrorMessage,[ValidateSet('abandoned','reconciled')][string]$Resolution,
-    [string]$BindingPath,[string]$GitRequestPath,[string]$GitReceiptPath,[string]$GitActionId,[ValidateSet('create_worktree','stage','commit','merge')][string]$GitOperation='create_worktree',[string]$CommitMessage,[string]$HandoffPath,[string]$DeveloperTaskId,[string]$WorktreeRoot,[string]$TargetBranch='main'
+    [string]$BindingPath,[string]$GitRequestPath,[string]$GitReceiptPath,[string]$GitActionId,[ValidateSet('create_worktree','stage','commit','merge')][string]$GitOperation='create_worktree',[string]$CommitMessage,[string]$HandoffPath,[string]$DeveloperTaskId,[string]$WorktreeRoot,[string]$TargetBranch='main',[string]$PreflightPath
 )
 
 $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot 'workflow-state.psm1') -Force -DisableNameChecking
 Import-Module (Join-Path $PSScriptRoot 'git-action-state.psm1') -Force -DisableNameChecking
+$emitSuccess=$true
 
 switch ($Action) {
-    'initialize' { if (-not $WorkflowId) { throw 'WorkflowId is required.' }; Initialize-WorkflowState -ProjectPath $ProjectPath -WorkflowId $WorkflowId -ControllerThreadId $ControllerThreadId -ControllerHostId $ControllerHostId }
+    'preflight' {& (Join-Path $PSScriptRoot 'test-project-readiness.ps1') -ProjectPath $ProjectPath -TargetBranch $TargetBranch;$emitSuccess=$false}
+    'initialize' {
+        if (-not $WorkflowId) { throw 'WorkflowId is required.' }
+        $preflightEvidence=$null
+        $previousPreference=$ErrorActionPreference
+        try{
+            $ErrorActionPreference='Continue'
+            & git -C $ProjectPath rev-parse --is-inside-work-tree 2>$null|Out-Null
+            $isGitProject=$LASTEXITCODE-eq0
+        }finally{$ErrorActionPreference=$previousPreference}
+        if($isGitProject){
+            if(-not$PreflightPath){throw 'PREFLIGHT_REQUIRED: existing Git projects require -PreflightPath.'}
+            $preflightEvidence=@(& (Join-Path $PSScriptRoot 'assert-project-readiness.ps1') -ProjectPath $ProjectPath -PreflightPath $PreflightPath -TargetBranch $TargetBranch)|Out-String|ConvertFrom-Json
+        }
+        Initialize-WorkflowState -ProjectPath $ProjectPath -WorkflowId $WorkflowId -ControllerThreadId $ControllerThreadId -ControllerHostId $ControllerHostId -TargetBranch $TargetBranch -PreflightEvidence $preflightEvidence
+    }
     'configure-git' {if(-not$WorktreeRoot){throw 'WorktreeRoot is required.'};Set-WorkflowGitConfiguration -ProjectPath $ProjectPath -WorktreeRoot $WorktreeRoot -TargetBranch $TargetBranch|ConvertTo-Json -Depth 20}
     'prepare-git-request' {if(-not$TaskId-or-not$GitRequestPath){throw 'TaskId and GitRequestPath are required.'};&(Join-Path $PSScriptRoot 'git-request-builder.ps1') -ProjectPath $ProjectPath -TaskId $TaskId -Operation $GitOperation -OutputPath $GitRequestPath -CommitMessage $CommitMessage|Out-Null;Start-GitAction -ProjectPath $ProjectPath -TaskId $TaskId -RequestPath $GitRequestPath -ExpectedControllerEpoch $ExpectedControllerEpoch|ConvertTo-Json -Depth 20}
     'record-development-handoff' {if(-not$TaskId-or-not$HandoffPath){throw 'TaskId and HandoffPath are required.'};Receive-DevelopmentHandoff -ProjectPath $ProjectPath -TaskId $TaskId -HandoffPath $HandoffPath|ConvertTo-Json -Depth 20}
@@ -62,4 +78,4 @@ switch ($Action) {
     'audit' { if (-not (Test-WorkflowStateIntegrity -ProjectPath $ProjectPath)) { throw 'Integrity audit failed.' } }
 }
 
-Write-Output "OK: $Action"
+if($emitSuccess){Write-Output "OK: $Action"}

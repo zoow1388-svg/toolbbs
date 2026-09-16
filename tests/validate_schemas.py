@@ -67,6 +67,18 @@ pairs = {
         "changed_files": ["src/app.ps1"], "summary": "Implemented the approved change.",
         "created_at": "2026-09-16T00:00:00Z",
     },
+    "project-readiness": {
+        "schema_version": 1, "project_path": "D:\\example-project", "observed_at": "2026-09-16T00:00:00Z", "expires_at": "2026-09-16T00:15:00Z",
+        "classification": "compatible", "recommended_mode": "full-integration",
+        "repository": {"is_git_repository": True, "repository_root": "D:\\example-project", "requested_path_is_root": True,
+            "git_version": "git version 2.51.0", "has_commits": True, "head_revision": "a" * 40, "current_branch": "main",
+            "is_detached": False, "target_branch": "main", "target_branch_exists": True, "status_lines": [],
+            "ongoing_operations": [], "worktree_count": 1, "git_user_name_configured": True,
+            "git_user_email_configured": True, "special_features": []},
+        "state": {"path": "D:\\example-project\\.codex-orchestrator", "exists": False, "tracked": False, "ignored": True},
+        "worktree": {"default_root": "D:\\.codex-worktrees\\example-project", "exists": False},
+        "findings": [], "summary": {"blockers": 0, "warnings": 0},
+    },
     "e2e-run": {
         "workflow_id": "WF-E2E-001",
         "repository_root": "D:\\e2e",
@@ -109,4 +121,4 @@ except jsonschema.ValidationError:
 else:
     raise AssertionError("Object changed_files entry unexpectedly passed validation")
 
-print("SCHEMA VALID: 18 positive, 2 negative")
+print("SCHEMA VALID: 19 positive, 2 negative")

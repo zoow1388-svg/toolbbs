@@ -2,6 +2,16 @@
 
 这是一个面向 Codex 桌面版的自动化多窗口项目总控 Skill：让一个总控任务通过不可变任务 ID 协调多个 Codex 任务，完成分析、开发、测试、审查、结果回传和中断恢复。源码仓库当前位于 D 盘，但 Skill 不要求用户电脑必须具有 D 盘，也不会自动安装到全局 Skill 目录。
 
+## v1.10.0 已有项目安全接入预检
+
+接入已经开发一段时间的项目时，先运行纯只读预检。预检不会创建 `.codex-orchestrator`、分支或工作树，也不会修改 `.gitignore`、Git 配置或项目文件：
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File '.\skill\codex-project-orchestrator\scripts\manage-workflow.ps1' -Action preflight -ProjectPath 'E:\目标项目' -TargetBranch main
+```
+
+报告分为 `compatible`、`isolated-only`、`read-only` 和 `blocked`，检查 Git 顶层目录、HEAD、当前与目标分支、脏工作区、冲突和未完成操作、Git 身份、已有工作树、状态目录忽略、Submodule、Git LFS 与 Sparse Checkout。报告有效期为 15 分钟；已有 Git 项目的初始化必须通过 `-PreflightPath` 提交保存的 `compatible` 报告，入口会重新核对 HEAD、分支、工作区、Git 操作和工作树清单。报告过期或现场变化时停止，且不会创建状态目录。
+
 ## v1.9.1 工作树路径兼容
 
 v1.9.1 移除自动工作树必须位于 D 盘和 ASCII 路径的限制。默认根目录根据项目位置自动推导为 `<项目父目录>\.codex-worktrees\<项目名>`，因此 C、D、E 或其他盘符上的项目都会使用同一盘符的相邻隔离目录。用户仍可通过 `configure-git` 指定其他 Windows 绝对路径。
@@ -43,7 +53,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File '.\skill\codex-project-o
 
 绑定会核对仓库根目录、工作树路径、分支、HEAD、基线提交和干净状态。两个活动开发任务不得共用工作树或分支。本版本不会自动创建、删除、提交、合并或推送 Git 内容。
 
-## v1.9.1 安装与升级
+## v1.10.0 安装与升级
 
 正式安装包包含 Skill、安装器、可恢复卸载器、文件清单和 SHA-256 校验值。普通用户请按照 [`docs/INSTALL.md`](docs/INSTALL.md) 操作。安装不需要 Python、`jsonschema` 或 PyYAML。
 
@@ -76,10 +86,11 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "Invoke-Pester '.\tes
 获得状态文件创建授权后初始化：
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File '.\skill\codex-project-orchestrator\scripts\manage-workflow.ps1' -Action initialize -ProjectPath 'D:\目标项目' -WorkflowId 'WF-001' -ControllerThreadId '总控任务ID' -ControllerHostId 'local'
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File '.\skill\codex-project-orchestrator\scripts\manage-workflow.ps1' -Action preflight -ProjectPath 'D:\目标项目' -TargetBranch main | Set-Content -Encoding UTF8 'D:\预检报告\WF-001-readiness.json'
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File '.\skill\codex-project-orchestrator\scripts\manage-workflow.ps1' -Action initialize -ProjectPath 'D:\目标项目' -WorkflowId 'WF-001' -ControllerThreadId '总控任务ID' -ControllerHostId 'local' -TargetBranch main -PreflightPath 'D:\预检报告\WF-001-readiness.json'
 ```
 
-登记任务时，`DependsOn` 和 `AllowedFiles` 使用逗号分隔。运行 `-Action audit` 可检查事件序号、状态一致性和中断写入残留。运行状态保存在目标项目的 `.codex-orchestrator` 中并默认由 Git 忽略。
+登记任务时，`DependsOn` 和 `AllowedFiles` 使用逗号分隔。运行 `-Action audit` 可检查事件序号、状态一致性和中断写入残留。运行状态保存在目标项目的 `.codex-orchestrator` 中；它只有在项目的 `.gitignore`、`.git/info/exclude` 或其他 Git 忽略规则实际包含该目录时才会被忽略，系统不会在预检阶段自动修改忽略规则。
 
 ## v0.2.1 结果双输出
 
