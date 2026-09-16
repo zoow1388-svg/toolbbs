@@ -28,6 +28,16 @@ Coordinate Codex tasks through supported task tools. Never use window titles, mo
 17. Advance through analysis, implementation, test, and review gates. Require every dependency revision to match the receiving task baseline. Complete a task only after trusted result verification and callback acknowledgement both succeed. Stop on missing evidence, stale results, conflicts, scope expansion, or new authorization requirements.
 18. Produce a truthful delivery report. Mark unexecuted checks as `未执行`.
 
+## Controlled Git operations
+
+Use `scripts/controlled-git.ps1` only after explicit `git-approved` authorization. Every create-worktree, stage, commit, or merge operation must come from an immutable request JSON validated against `schemas/git-operation.schema.json`, and must create a new immutable receipt matching `schemas/git-operation-receipt.schema.json`.
+
+- Create only `codex/` branches and separate worktrees from an exact commit hash. Stop if the repository is dirty, the branch/path exists, or the baseline changes.
+- Stage only the exact authorized file list. Refuse unauthorized or remaining unstaged changes.
+- Commit only already-staged authorized files with a supplied message. Do not stage implicitly during commit.
+- Merge only from a clean target branch at the exact recorded baseline. Require trusted tester and reviewer evidence whose receipt hashes bind to the exact source commit, and perform a conflict preflight before merging.
+- Never push, force, delete a branch/worktree, or resolve conflicts automatically. These remain separate user decisions.
+
 For a real five-window acceptance, require one controller plus four distinct worker thread IDs. After all callbacks, trusted verifications, tests, and review complete, create a single evidence document and run `scripts/verify-five-window-e2e.ps1`. Do not claim real E2E success from simulated fixtures or unit tests.
 
 Before choosing an operational step, run `plan-next-actions.ps1` for the whole workflow. Validate the saved plan with `test-action-plan-current.ps1` immediately before executing any listed action. Regenerate it when the event sequence or state hashes change. The plan describes actions but never authorizes them.
@@ -56,7 +66,7 @@ When resuming, prefer `plan-next-actions.ps1` for workflow-wide decisions. Keep 
 
 Save raw send receipts, wait responses, and thread reads inside the target project's state directory. Record their paths and hashes. Treat send message IDs as optional and record them only when the host actually returns them; result item IDs are required because full-result extraction is exact.
 
-Do not automatically commit, push, deploy, delete, migrate data, install software, restart services, or use real credentials. Do not overwrite user changes. Allow at most one targeted factual repair with an identified cause; formatting normalization is the controller's responsibility and must not consume a repair attempt.
+Do not commit or merge outside the controlled Git request/receipt flow. Never automatically push, deploy, delete, migrate data, install software, restart services, or use real credentials. Do not overwrite user changes. Allow at most one targeted factual repair with an identified cause; formatting normalization is the controller's responsibility and must not consume a repair attempt.
 
 Register a repair with a new task ID and `-RepairOf`. Preserve its source role, dependencies, authorization, and file boundary. A second repair or expanded scope requires a new analysis and user decision.
 

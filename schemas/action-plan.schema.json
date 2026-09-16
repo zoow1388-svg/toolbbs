@@ -5,7 +5,7 @@
   "additionalProperties": false,
   "required": ["schema_version", "workflow_id", "project_path", "controller_thread_id", "controller_host_id", "controller_epoch", "based_on_event_sequence", "workflow_state_sha256", "tasks_state_sha256", "external_actions_sha256", "action_executions_sha256", "generated_at", "actions"],
   "properties": {
-    "schema_version": {"const": 5},
+    "schema_version": {"const": 6},
     "workflow_id": {"type": "string", "minLength": 1},
     "project_path": {"type": "string", "pattern": "^[A-Za-z]:\\\\"},
     "controller_thread_id": {"type": ["string", "null"]},
@@ -25,7 +25,7 @@
         "required": ["action_id", "type", "task_ids", "based_on_event_sequence", "operation", "parameters", "operation_sha256", "evidence_required", "state_changing", "authorization_required", "reason"],
         "properties": {
           "action_id": {"type": "string", "minLength": 1},
-          "type": {"enum": ["request_authorization", "prepare_dispatch", "begin_external_action", "inspect_external_action", "inspect_action_execution", "resolve_action_execution", "request_retry_authorization", "record_external_action", "send_message", "wait_tasks", "read_result", "normalize_result", "verify_result", "send_callback_ack", "wait_callback", "complete_task", "manual_review", "workflow_complete"]},
+          "type": {"enum": ["request_authorization", "prepare_dispatch", "begin_external_action", "inspect_external_action", "inspect_action_execution", "resolve_action_execution", "request_retry_authorization", "record_external_action", "controlled_git", "send_message", "wait_tasks", "read_result", "normalize_result", "verify_result", "send_callback_ack", "wait_callback", "complete_task", "manual_review", "workflow_complete"]},
           "task_ids": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
           "based_on_event_sequence": {"type": "integer", "minimum": 0},
           "operation": {"type": "string", "minLength": 1},

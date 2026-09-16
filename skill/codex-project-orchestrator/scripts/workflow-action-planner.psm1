@@ -139,7 +139,7 @@ function New-WorkflowActionPlan {
         Add-Action 'workflow_complete' @() 'report_completion' ([ordered]@{workflow_id=$workflow.workflow_id}) @('successful workflow audit','final delivery report') $false $null 'Every task is trusted complete.'
     }
     [pscustomobject][ordered]@{
-        schema_version=5;workflow_id=$workflow.workflow_id;project_path=$resolvedProject;controller_thread_id=$workflow.controller_thread_id;controller_host_id=$workflow.controller_host_id;controller_epoch=[int64]$workflow.controller_epoch;based_on_event_sequence=$sequence
+        schema_version=6;workflow_id=$workflow.workflow_id;project_path=$resolvedProject;controller_thread_id=$workflow.controller_thread_id;controller_host_id=$workflow.controller_host_id;controller_epoch=[int64]$workflow.controller_epoch;based_on_event_sequence=$sequence
         workflow_state_sha256=(Get-FileSha256 $workflowPath);tasks_state_sha256=(Get-FileSha256 $tasksPath);external_actions_sha256=$(if(Test-Path -LiteralPath $externalActionsPath){Get-FileSha256 $externalActionsPath}else{$null});action_executions_sha256=$(if(Test-Path -LiteralPath $actionExecutionsPath){Get-FileSha256 $actionExecutionsPath}else{$null})
         generated_at=(Get-Date).ToUniversalTime().ToString('o');actions=@($actions)
     }

@@ -39,6 +39,20 @@ pairs = {
         "is_dirty": False,
         "inspected_at": "2026-09-16T00:00:00Z",
     },
+    "git-operation": {
+        "operation_id": "GIT-001", "operation": "stage", "authorization": "git-approved",
+        "repository_root": "D:\\example-project", "worktree_path": "D:\\worktrees\\dev-001",
+        "base_revision": "a" * 40, "branch_name": "codex/dev-001", "allowed_files": ["src/app.ps1"],
+        "commit_message": None, "target_branch": None, "test_evidence": None, "review_evidence": None,
+        "created_at": "2026-09-16T00:00:00Z",
+    },
+    "git-operation-receipt": {
+        "operation_id": "GIT-001", "operation": "stage", "request_path": "D:\\state\\request.json",
+        "request_sha256": "a" * 64, "repository_root": "D:\\example-project", "worktree_path": "D:\\worktrees\\dev-001",
+        "branch_name": "codex/dev-001", "base_revision": "a" * 40, "end_revision": "a" * 40,
+        "changed_files": ["src/app.ps1"], "test_evidence_sha256": None, "review_evidence_sha256": None,
+        "push_performed": False, "force_performed": False, "status": "completed", "completed_at": "2026-09-16T00:00:00Z",
+    },
     "e2e-run": {
         "workflow_id": "WF-E2E-001",
         "repository_root": "D:\\e2e",
@@ -81,4 +95,4 @@ except jsonschema.ValidationError:
 else:
     raise AssertionError("Object changed_files entry unexpectedly passed validation")
 
-print("SCHEMA VALID: 14 positive, 2 negative")
+print("SCHEMA VALID: 16 positive, 2 negative")

@@ -2,6 +2,12 @@
 
 这是一个面向 Codex 桌面版的自动化多窗口项目总控 Skill：让一个总控任务通过不可变任务 ID 协调多个 Codex 任务，完成分析、开发、测试、审查、结果回传和中断恢复。项目当前只在 D 盘开发，不会自动安装到全局 Skill 目录。
 
+## v1.7 受控 Git 自动化
+
+v1.7 新增基于不可变 JSON 请求与回执的 Git 执行器，可在明确 `git-approved` 授权后创建 `codex/` 分支和独立工作树、暂存指定文件、提交，以及在测试和审查均可信时合并。仓库脏、文件越权、基线变化、证据被篡改或存在冲突都会立即停止。
+
+本版本默认不会推送远程、强制合并、自动解决冲突或删除分支/工作树。Git 操作入口为 `manage-workflow.ps1 -Action controlled-git`，请求和回执格式见 `schemas/git-operation*.schema.json`。
+
 ## v1.6 五窗口真实 E2E 准备
 
 v1.6 使用一个总控任务和分析、开发、测试、审查四个独立执行任务。开发任务使用独立分支工作树；测试和审查分别使用绑定到开发提交的独立验证工作树。`verify-five-window-e2e.ps1` 只接受四个不同任务 ID 和线程 ID、完整回传 ACK、可信验证、真实代码提交、通过的测试以及无遗留问题的独立审查。
@@ -19,7 +25,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File '.\skill\codex-project-o
 
 绑定会核对仓库根目录、工作树路径、分支、HEAD、基线提交和干净状态。两个活动开发任务不得共用工作树或分支。本版本不会自动创建、删除、提交、合并或推送 Git 内容。
 
-## v1.6.0 安装与升级
+## v1.7.0 安装与升级
 
 正式安装包包含 Skill、安装器、可恢复卸载器、文件清单和 SHA-256 校验值。普通用户请按照 [`docs/INSTALL.md`](docs/INSTALL.md) 操作。安装不需要 Python、`jsonschema` 或 PyYAML。
 

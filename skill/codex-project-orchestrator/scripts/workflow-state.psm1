@@ -120,7 +120,7 @@ function Add-Defaults {
             Add-Member -InputObject $task -NotePropertyName verification_status -NotePropertyValue $verificationStatus
         }
     }
-    if ([int]$Workflow.state_version -lt 15) { $Workflow.state_version = 15 }
+    if ([int]$Workflow.state_version -lt 16) { $Workflow.state_version = 16 }
 }
 
 function Get-LiveWorktreeIdentity {
@@ -155,7 +155,7 @@ function Initialize-WorkflowState {
         $workflowPath = Join-Path $state 'workflow.json'
         if (Test-Path -LiteralPath $workflowPath) { throw 'Workflow already exists.' }
         $now = Get-UtcTimestamp
-        $workflow = [ordered]@{ workflow_id=$WorkflowId; project_path=$resolved; state_version=15; controller_thread_id=$(if([string]::IsNullOrWhiteSpace($ControllerThreadId)){$null}else{$ControllerThreadId}); controller_host_id=$(if([string]::IsNullOrWhiteSpace($ControllerThreadId)){$null}else{$ControllerHostId}); controller_epoch=$(if([string]::IsNullOrWhiteSpace($ControllerThreadId)){0}else{1}); controller_history=@(); status='draft'; current_stage='analysis'; authorization='read-only'; event_sequence=0; created_at=$now; updated_at=$now }
+        $workflow = [ordered]@{ workflow_id=$WorkflowId; project_path=$resolved; state_version=16; controller_thread_id=$(if([string]::IsNullOrWhiteSpace($ControllerThreadId)){$null}else{$ControllerThreadId}); controller_host_id=$(if([string]::IsNullOrWhiteSpace($ControllerThreadId)){$null}else{$ControllerHostId}); controller_epoch=$(if([string]::IsNullOrWhiteSpace($ControllerThreadId)){0}else{1}); controller_history=@(); status='draft'; current_stage='analysis'; authorization='read-only'; event_sequence=0; created_at=$now; updated_at=$now }
         $tasks = @()
         Write-Event $state $workflow 'workflow_initialized' $null $null 'draft' 'initialization'
         Write-JsonAtomic $workflow $workflowPath
@@ -241,7 +241,7 @@ function Claim-WorkflowAction {
         if([int64]$workflow.controller_epoch -ne $ExpectedControllerEpoch){throw 'STALE_CONTROLLER_LEASE: controller epoch changed.'}
         if([int64]$workflow.controller_epoch -lt 1 -or [string]::IsNullOrWhiteSpace([string]$workflow.controller_thread_id) -or [string]::IsNullOrWhiteSpace([string]$workflow.controller_host_id)){throw 'A configured controller is required to claim an action.'}
         if(-not(Test-Path -LiteralPath $PlanPath)){throw 'Action plan file not found.'};$resolvedPlan=[IO.Path]::GetFullPath($PlanPath);$plan=Read-StateJson $resolvedPlan
-        if($plan.schema_version -ne 5 -or $plan.workflow_id -ne $workflow.workflow_id -or [int64]$plan.controller_epoch -ne [int64]$workflow.controller_epoch -or $plan.controller_thread_id -ne $workflow.controller_thread_id -or $plan.controller_host_id -ne $workflow.controller_host_id){throw 'STALE_ACTION_PLAN: plan identity changed.'}
+        if($plan.schema_version -ne 6 -or $plan.workflow_id -ne $workflow.workflow_id -or [int64]$plan.controller_epoch -ne [int64]$workflow.controller_epoch -or $plan.controller_thread_id -ne $workflow.controller_thread_id -or $plan.controller_host_id -ne $workflow.controller_host_id){throw 'STALE_ACTION_PLAN: plan identity changed.'}
         foreach($pair in @(@($plan.workflow_state_sha256,$workflowPath),@($plan.tasks_state_sha256,$tasksPath),@($plan.external_actions_sha256,$externalPath),@($plan.action_executions_sha256,$executionsPath))){$actual=$(if(Test-Path -LiteralPath $pair[1]){(Get-FileHash $pair[1] -Algorithm SHA256).Hash.ToLowerInvariant()}else{$null});if($pair[0] -ne $actual){throw 'STALE_ACTION_PLAN: state changed.'}}
         $action=@($plan.actions|Where-Object{$_.action_id -eq $ActionId});if($action.Count -ne 1){throw 'Action not found exactly once in plan.'};$action=$action[0]
         $executions=@(Read-ActionExecutions $state);if(@($executions|Where-Object{$_.action_id -eq $ActionId}).Count){throw 'ACTION_ALREADY_CLAIMED: inspect the existing execution checkpoint.'}
