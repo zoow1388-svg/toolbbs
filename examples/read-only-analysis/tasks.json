@@ -2,8 +2,8 @@
   {
     "task_id": "ANALYSIS-001", "thread_id": "example-thread", "host_id": "local", "role": "analyst", "repair_of": null,
     "status": "approved", "depends_on": [], "project_path": "D:\\example-project", "base_revision": "unborn",
-    "worktree_binding_path": null, "worktree_binding_sha256": null, "worktree_path": null,
-    "branch_name": null, "worktree_head_revision": null, "worktree_bound_at": null,
+    "worktree_mode": null, "worktree_binding_path": null, "worktree_binding_sha256": null, "worktree_path": null,
+    "branch_name": null, "worktree_head_revision": null, "worktree_is_detached": null, "worktree_bound_at": null,
     "allowed_files": [], "objective": "只读分析项目结构", "authorization": "read-only", "repair_count": 0,
     "callback_event_id": null, "callback_target_thread_id": null, "callback_target_host_id": null, "dispatch_controller_epoch": null, "callback_status": "not-prepared",
     "updated_at": "2026-09-15T00:00:00+08:00"

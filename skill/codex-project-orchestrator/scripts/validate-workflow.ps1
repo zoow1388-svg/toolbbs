@@ -51,9 +51,9 @@ foreach ($task in $tasks) {
     }
 }
 
-$activeBoundDevelopers=@($tasks|Where-Object{$_.role -eq 'developer' -and $_.status -notin @('completed','blocked','failed','cancelled','stale') -and -not [string]::IsNullOrWhiteSpace([string]$_.worktree_path)})
-foreach($group in @($activeBoundDevelopers|Group-Object worktree_path|Where-Object Count -gt 1)){Add-ValidationError "active developer worktree path conflict: $($group.Name)"}
-foreach($group in @($activeBoundDevelopers|Group-Object branch_name|Where-Object Count -gt 1)){Add-ValidationError "active developer branch conflict: $($group.Name)"}
+$activeBoundWorkspaces=@($tasks|Where-Object{$_.role -in @('developer','tester','reviewer') -and $_.status -notin @('completed','blocked','failed','cancelled','stale') -and -not [string]::IsNullOrWhiteSpace([string]$_.worktree_path)})
+foreach($group in @($activeBoundWorkspaces|Group-Object worktree_path|Where-Object Count -gt 1)){Add-ValidationError "active task worktree path conflict: $($group.Name)"}
+foreach($group in @($activeBoundWorkspaces|Where-Object{-not [string]::IsNullOrWhiteSpace([string]$_.branch_name)}|Group-Object branch_name|Where-Object Count -gt 1)){Add-ValidationError "active task branch conflict: $($group.Name)"}
 
 foreach ($task in $tasks) {
     foreach ($dependency in @($task.depends_on | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })) {

@@ -2,6 +2,12 @@
 
 这是一个面向 Codex 桌面版的自动化多窗口项目总控 Skill：让一个总控任务通过不可变任务 ID 协调多个 Codex 任务，完成分析、开发、测试、审查、结果回传和中断恢复。项目当前只在 D 盘开发，不会自动安装到全局 Skill 目录。
 
+## v1.6 五窗口真实 E2E 准备
+
+v1.6 使用一个总控任务和分析、开发、测试、审查四个独立执行任务。开发任务使用独立分支工作树；测试和审查分别使用绑定到开发提交的独立验证工作树。`verify-five-window-e2e.ps1` 只接受四个不同任务 ID 和线程 ID、完整回传 ACK、可信验证、真实代码提交、通过的测试以及无遗留问题的独立审查。
+
+仓库中的自动测试和 `examples/five-window-e2e` 只验证协议与隔离测试场景，不能代替真实 Codex 五窗口验收。真实验收必须另行授权创建四个 Codex 任务和隔离测试仓库。
+
 ## v1.5 Git Worktree 隔离
 
 开发任务使用真实 Git 提交作为基线时，必须绑定独立、干净且处于分支上的 Git Worktree。总控先生成检查证据，再登记到任务状态：
@@ -13,7 +19,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File '.\skill\codex-project-o
 
 绑定会核对仓库根目录、工作树路径、分支、HEAD、基线提交和干净状态。两个活动开发任务不得共用工作树或分支。本版本不会自动创建、删除、提交、合并或推送 Git 内容。
 
-## v1.5.0 安装与升级
+## v1.6.0 安装与升级
 
 正式安装包包含 Skill、安装器、可恢复卸载器、文件清单和 SHA-256 校验值。普通用户请按照 [`docs/INSTALL.md`](docs/INSTALL.md) 操作。安装不需要 Python、`jsonschema` 或 PyYAML。
 

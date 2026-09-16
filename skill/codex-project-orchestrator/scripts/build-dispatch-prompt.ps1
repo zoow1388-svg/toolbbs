@@ -26,7 +26,8 @@ $lines.Add("- 项目：$($dispatch.project_path)")
 $lines.Add("- Git 基线：$($dispatch.base_revision)")
 if($null -ne $dispatch.worktree){
     $lines.Add("- Git Worktree：$($dispatch.worktree.path)")
-    $lines.Add("- 工作分支：$($dispatch.worktree.branch_name)")
+    $lines.Add("- 工作树模式：$($dispatch.worktree.mode)")
+    $lines.Add("- 工作分支：$(if($dispatch.worktree.is_detached){'detached HEAD'}else{$dispatch.worktree.branch_name})")
     $lines.Add('- 开始修改前必须核对当前目录、分支、HEAD 和干净状态；任一不一致立即停止并回报。')
 }
 $lines.Add("- 授权：$($dispatch.authorization)");$lines.Add('')

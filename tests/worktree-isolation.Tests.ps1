@@ -75,4 +75,17 @@ Describe 'v1.5 Git worktree isolation' {
         $LASTEXITCODE | Should Be 0
         Invoke-WorktreeManager @('-Action','bind-worktree','-ProjectPath',$repository,'-TaskId','DEV-001','-BindingPath',$dirtyBinding) | Should Be 1
     }
+
+    It 'binds a detached clean verification worktree to a tester' {
+        $verificationWorktree=Join-Path (Split-Path -Parent $repository) 'worktree-test-001'
+        & git -C $repository worktree add --detach $verificationWorktree $baseRevision|Out-Null
+        $verificationBinding=Join-Path $repository 'verification-binding.json'
+        & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $inspector -WorktreePath $verificationWorktree -Mode verification -OutputPath $verificationBinding|Out-Null
+        $LASTEXITCODE|Should Be 0
+        Invoke-WorktreeManager @('-Action','register','-ProjectPath',$repository,'-TaskId','DEV-001','-ThreadId','thread-dev-1','-Role','developer','-Objective','develop','-Authorization','implementation-approved','-DependsOn','ANALYSIS-001','-AllowedFiles','src/app.ps1','-BaseRevision',$baseRevision)|Should Be 0
+        Invoke-WorktreeManager @('-Action','register','-ProjectPath',$repository,'-TaskId','TEST-001','-ThreadId','thread-test-1','-Role','tester','-Objective','test','-Authorization','test-approved','-DependsOn','DEV-001','-BaseRevision',$baseRevision)|Should Be 0
+        Invoke-WorktreeManager @('-Action','bind-worktree','-ProjectPath',$repository,'-TaskId','TEST-001','-BindingPath',$verificationBinding)|Should Be 0
+        $task=@(Get-Content (Join-Path $repository '.codex-orchestrator\tasks.json') -Raw -Encoding UTF8|ConvertFrom-Json|ForEach-Object{$_}|Where-Object{$_.task_id -eq 'TEST-001'})[0]
+        $task.worktree_mode|Should Be 'verification';$task.worktree_is_detached|Should Be $true;$task.branch_name|Should Be $null
+    }
 }

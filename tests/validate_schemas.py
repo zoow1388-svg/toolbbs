@@ -30,6 +30,7 @@ pairs = {
     "external-action": load_json(EXAMPLES / "external-action.json"),
     "action-execution": load_json(EXAMPLES / "action-execution.json"),
     "worktree-binding": {
+        "mode": "developer",
         "repository_root": "D:\\example-project",
         "worktree_path": "D:\\worktrees\\dev-001",
         "branch_name": "codex/dev-001",
@@ -37,6 +38,21 @@ pairs = {
         "is_detached": False,
         "is_dirty": False,
         "inspected_at": "2026-09-16T00:00:00Z",
+    },
+    "e2e-run": {
+        "workflow_id": "WF-E2E-001",
+        "repository_root": "D:\\e2e",
+        "controller_thread_id": "controller",
+        "tasks": [
+            {"task_id": "ANALYSIS-001", "thread_id": "a", "role": "analyst", "worktree_path": "D:\\e2e", "base_revision": "a" * 40, "end_revision": "a" * 40, "callback_status": "acknowledged", "verification_status": "trusted"},
+            {"task_id": "DEV-001", "thread_id": "d", "role": "developer", "worktree_path": "D:\\wt-dev", "base_revision": "a" * 40, "end_revision": "b" * 40, "callback_status": "acknowledged", "verification_status": "trusted"},
+            {"task_id": "TEST-001", "thread_id": "t", "role": "tester", "worktree_path": "D:\\wt-test", "base_revision": "b" * 40, "end_revision": "b" * 40, "callback_status": "acknowledged", "verification_status": "trusted"},
+            {"task_id": "REVIEW-001", "thread_id": "r", "role": "reviewer", "worktree_path": "D:\\wt-review", "base_revision": "b" * 40, "end_revision": "b" * 40, "callback_status": "acknowledged", "verification_status": "trusted"},
+        ],
+        "development": {"commit": "b" * 40, "changed_files": ["src/Greeting.ps1"]},
+        "test": {"inspected_revision": "b" * 40, "checks": [{"name": "Pester", "status": "passed", "exit_code": 0}]},
+        "review": {"inspected_revision": "b" * 40, "outcome": "passed", "findings": []},
+        "created_at": "2026-09-16T00:00:00Z",
     },
 }
 
@@ -65,4 +81,4 @@ except jsonschema.ValidationError:
 else:
     raise AssertionError("Object changed_files entry unexpectedly passed validation")
 
-print("SCHEMA VALID: 13 positive, 2 negative")
+print("SCHEMA VALID: 14 positive, 2 negative")

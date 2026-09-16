@@ -1,6 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory=$true)][string]$WorktreePath,
+    [ValidateSet('developer','verification')][string]$Mode='developer',
     [string]$OutputPath
 )
 
@@ -22,17 +23,18 @@ if ($resolved -notin $roots) { throw 'Target is not registered in git worktree l
 $repositoryRoot = $roots[0]
 $branch = (& git -C $resolved symbolic-ref --quiet --short HEAD 2>$null)
 $detached = $LASTEXITCODE -ne 0
-if ($detached -or [string]::IsNullOrWhiteSpace($branch)) { throw 'Detached HEAD worktrees cannot be bound.' }
+if ($Mode -eq 'developer' -and ($detached -or [string]::IsNullOrWhiteSpace($branch))) { throw 'Developer worktrees cannot use detached HEAD.' }
 $head = (& git -C $resolved rev-parse HEAD).Trim().ToLowerInvariant()
 if ($LASTEXITCODE -ne 0 -or $head -notmatch '^[a-f0-9]{40,64}$') { throw 'Unable to resolve worktree HEAD.' }
 $dirty = @(& git -C $resolved status --porcelain=v1).Count -gt 0
 
 $binding = [ordered]@{
+    mode = $Mode
     repository_root = $repositoryRoot
     worktree_path = $resolved
-    branch_name = $branch.Trim()
+    branch_name = $(if($detached){$null}else{$branch.Trim()})
     head_revision = $head
-    is_detached = $false
+    is_detached = $detached
     is_dirty = $dirty
     inspected_at = (Get-Date).ToUniversalTime().ToString('o')
 }

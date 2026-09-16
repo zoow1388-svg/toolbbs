@@ -14,7 +14,7 @@ Coordinate Codex tasks through supported task tools. Never use window titles, mo
 3. List Codex tasks and register each task by immutable task ID, host ID, project path, role, and Git baseline.
 4. After the user authorizes state-file creation, use `scripts/manage-workflow.ps1` to initialize and mutate `.codex-orchestrator/`; do not hand-edit live state.
 5. Register every task through the manager so it enforces unique IDs, role dependencies, and exclusive file ownership.
-6. For a developer task with a commit-based Git baseline, require a dedicated clean branch worktree. Run `scripts/inspect-worktree.ps1`, bind its evidence with `manage-workflow.ps1 -Action bind-worktree`, and reject shared paths, shared branches, detached HEAD, dirty state, wrong repositories, or baseline drift.
+6. For developer, tester, and reviewer tasks with a commit-based Git baseline, require distinct clean worktrees. Developers require branch mode; testers and reviewers use verification mode and may use detached HEAD at the exact development commit. Run `scripts/inspect-worktree.ps1`, bind its evidence with `manage-workflow.ps1 -Action bind-worktree`, and reject shared paths, shared branches, dirty state, wrong repositories, or baseline drift.
 7. Present the modification plan and wait for explicit implementation approval.
 8. Dispatch only approved tasks. Do not interpret design approval as implementation, Git, deployment, deletion, or external-action approval.
 9. Configure the controller and use `prepare-dispatch` to create an immutable envelope. Before any `send_message_to_thread` call, run `begin-external-action` with the current controller epoch and use only its returned payload. Preserve the raw tool receipt, run `complete-external-action`, then apply that completed action with `record-sent` or `record-callback-ack` and the same external action ID. Never bypass the journal.
@@ -27,6 +27,8 @@ Coordinate Codex tasks through supported task tools. Never use window titles, mo
 16. Independently verify Git revision, changed files, commands, tests, and artifacts. A task saying "complete" is not proof.
 17. Advance through analysis, implementation, test, and review gates. Require every dependency revision to match the receiving task baseline. Complete a task only after trusted result verification and callback acknowledgement both succeed. Stop on missing evidence, stale results, conflicts, scope expansion, or new authorization requirements.
 18. Produce a truthful delivery report. Mark unexecuted checks as `未执行`.
+
+For a real five-window acceptance, require one controller plus four distinct worker thread IDs. After all callbacks, trusted verifications, tests, and review complete, create a single evidence document and run `scripts/verify-five-window-e2e.ps1`. Do not claim real E2E success from simulated fixtures or unit tests.
 
 Before choosing an operational step, run `plan-next-actions.ps1` for the whole workflow. Validate the saved plan with `test-action-plan-current.ps1` immediately before executing any listed action. Regenerate it when the event sequence or state hashes change. The plan describes actions but never authorizes them.
 
