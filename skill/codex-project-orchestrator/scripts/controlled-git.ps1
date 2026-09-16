@@ -1,7 +1,8 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory=$true)][string]$RequestPath,
-    [Parameter(Mandatory=$true)][string]$ReceiptPath
+    [Parameter(Mandatory=$true)][string]$ReceiptPath,
+    [string]$ExpectedRequestSha256
 )
 
 Set-StrictMode -Version 2.0
@@ -41,6 +42,7 @@ $requestFile=[IO.Path]::GetFullPath($RequestPath)
 $receiptFile=[IO.Path]::GetFullPath($ReceiptPath)
 if(-not(Test-Path -LiteralPath $requestFile -PathType Leaf)){throw 'Git operation request not found.'}
 if(Test-Path -LiteralPath $receiptFile){throw 'Git operation receipt already exists; refusing replay.'}
+if(-not[string]::IsNullOrWhiteSpace($ExpectedRequestSha256) -and (Get-FileHash -LiteralPath $requestFile -Algorithm SHA256).Hash.ToLowerInvariant() -ne $ExpectedRequestSha256){throw 'Git operation request hash changed after journaling.'}
 $request=Get-Content -LiteralPath $requestFile -Raw -Encoding UTF8|ConvertFrom-Json
 foreach($name in @('operation_id','operation','authorization','repository_root','worktree_path','base_revision','branch_name','allowed_files','commit_message','target_branch','test_evidence','review_evidence','created_at')){if($request.PSObject.Properties.Match($name).Count -eq 0){throw "Git operation request missing field: $name"}}
 if($request.authorization -ne 'git-approved'){throw 'Explicit git-approved authorization is required.'}

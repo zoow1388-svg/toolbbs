@@ -22,6 +22,16 @@ Describe 'v1.8 Git transaction orchestration' {
         $planPath=Join-Path $project 'plan.json';&$planner -ProjectPath $project -OutputPath $planPath|Out-Null;$plan=Get-Content $planPath -Raw|ConvertFrom-Json
         @($plan.actions|Where-Object{$_.type-eq'controlled_git'}).Count|Should Be 1
         ($plan.actions|Where-Object{$_.type-eq'controlled_git'}).parameters.git_action_id|Should Be $action.git_action_id
+        @($plan.actions|Where-Object{$_.task_ids -contains 'DEV-001' -and $_.type-ne'controlled_git'}).Count|Should Be 0
+    }
+    It 'rejects a request that self-asserts authorization or changes after journaling' {
+        $tasksPath=Join-Path $project '.codex-orchestrator\tasks.json';$tasks=Get-Content $tasksPath -Raw|ConvertFrom-Json;$tasks[1].authorization='implementation-approved';Write-TestJson $tasksPath $tasks
+        {&$manager -Action begin-git-action -ProjectPath $project -TaskId DEV-001 -GitRequestPath $requestPath -ExpectedControllerEpoch 1}|Should Throw
+        $tasks[1].authorization='git-approved';Write-TestJson $tasksPath $tasks
+        $action=&$manager -Action begin-git-action -ProjectPath $project -TaskId DEV-001 -GitRequestPath $requestPath -ExpectedControllerEpoch 1|Where-Object{$_ -notlike 'OK:*'}|ConvertFrom-Json
+        $request=Get-Content $requestPath -Raw|ConvertFrom-Json;$request.branch_name='codex/tampered';Write-TestJson $requestPath $request
+        {&$manager -Action controlled-git -ProjectPath $project -GitActionId $action.git_action_id -GitRequestPath $requestPath -GitReceiptPath $receiptPath}|Should Throw
+        Test-Path $worktree|Should Be $false
     }
     It 'completes once and refuses duplicate logical execution' {
         $action=&$manager -Action begin-git-action -ProjectPath $project -TaskId DEV-001 -GitRequestPath $requestPath -ExpectedControllerEpoch 1|Where-Object{$_ -notlike 'OK:*'}|ConvertFrom-Json

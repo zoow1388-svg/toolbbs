@@ -20,7 +20,8 @@ function Start-GitAction {
     Invoke-GitStateLock $state {
         $workflow=Get-Content (Join-Path $state 'workflow.json') -Raw -Encoding UTF8|ConvertFrom-Json;$tasks=@(Get-Content (Join-Path $state 'tasks.json') -Raw -Encoding UTF8|ConvertFrom-Json|ForEach-Object{$_});$actions=@(Read-GitActions $state)
         if([int64]$workflow.controller_epoch-ne$ExpectedControllerEpoch){throw 'STALE_CONTROLLER_LEASE: controller epoch changed.'}
-        if(@($tasks|Where-Object{$_.task_id-eq$TaskId}).Count-ne1){throw "Task not found: $TaskId"}
+        $task=@($tasks|Where-Object{$_.task_id-eq$TaskId});if($task.Count-ne1){throw "Task not found: $TaskId"};$task=$task[0]
+        if($task.authorization-ne'git-approved'){throw 'Registered task does not have explicit Git authorization.'}
         $resolved=[IO.Path]::GetFullPath($RequestPath);if(-not(Test-Path $resolved -PathType Leaf)){throw 'Git request not found.'};$request=Get-Content $resolved -Raw -Encoding UTF8|ConvertFrom-Json
         if($request.authorization-ne'git-approved'){throw 'Explicit git-approved authorization is required.'};if([IO.Path]::GetFullPath([string]$request.repository_root)-ne$project){throw 'Git request repository does not match workflow project.'}
         $logical="$TaskId`:$($request.operation)";$prior=@($actions|Where-Object{$_.logical_key-eq$logical});if(@($prior|Where-Object{$_.status-notin@('cancelled','failed')}).Count){throw 'GIT_ACTION_ALREADY_STARTED: inspect the existing transaction.'}

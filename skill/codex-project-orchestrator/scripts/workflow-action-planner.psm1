@@ -52,13 +52,14 @@ function New-WorkflowActionPlan {
     $roleOrder=@{analyst=0;developer=1;tester=2;reviewer=3}
     foreach($gitAction in @($gitActions|Sort-Object created_at)){
         if($gitAction.status -eq 'prepared'){
-            Add-Action 'controlled_git' @($gitAction.task_id) 'manage-workflow:controlled-git' ([ordered]@{git_action_id=$gitAction.git_action_id;request_path=$gitAction.request_path;receipt_path=(Join-Path $stateDirectory "git-receipts\$($gitAction.operation_id).json")}) @('controlled Git receipt','unchanged repository baseline') $true 'git-approved' 'A journaled Git operation is ready for deterministic execution.'
+            Add-Action 'controlled_git' @($gitAction.task_id) 'manage-workflow:controlled-git' ([ordered]@{git_action_id=$gitAction.git_action_id;request_path=$gitAction.request_path;request_sha256=$gitAction.request_sha256;receipt_path=(Join-Path $stateDirectory "git-receipts\$($gitAction.operation_id).json")}) @('controlled Git receipt','unchanged request hash','unchanged repository baseline') $true 'git-approved' 'A journaled Git operation is ready for deterministic execution.'
         }elseif($gitAction.status -eq 'failed'){
             Add-Action 'manual_review' @($gitAction.task_id) 'inspect_git_action' ([ordered]@{git_action_id=$gitAction.git_action_id;error=$gitAction.error}) @('Git repository inspection','failure evidence','explicit retry decision') $false 'explicit-user-direction' 'A Git operation failed and must not be retried automatically.'
         }
     }
     $orderedTasks=@($tasks|Sort-Object @{Expression={$roleOrder[[string]$_.role]}},task_id)
     foreach($task in $orderedTasks){
+        if(@($gitActions|Where-Object{$_.task_id-eq$task.task_id-and$_.status-in@('prepared','failed')}).Count){continue}
         if($task.callback_status -eq 'received'){
             $attempts=@($externalActions|Where-Object{$_.task_id -eq $task.task_id -and $_.action_type -eq 'callback_ack'}|Sort-Object attempt)
             $attempt=$(if($attempts.Count){$attempts[-1]}else{$null})
