@@ -2,6 +2,12 @@
 
 这是一个面向 Codex 桌面版的自动化多窗口项目总控 Skill：让一个总控任务通过不可变任务 ID 协调多个 Codex 任务，完成分析、开发、测试、审查、结果回传和中断恢复。源码仓库当前位于 D 盘，但 Skill 不要求用户电脑必须具有 D 盘，也不会自动安装到全局 Skill 目录。
 
+## v1.11.0 远程 CI 与发布验证
+
+`tests/run-validation.ps1` 是本地和 GitHub Actions 共用的完整验证入口，依次执行 PowerShell 语法、JSON Schema、Skill 和完整 Pester 检查，并生成 JSON 摘要与 NUnit XML。PR 与 `main` 推送由 `.github/workflows/ci.yml` 自动验证，成功或失败都会上传已有测试证据；`v*` 标签由 `release-validation.yml` 核对标签与 `VERSION`、重新测试、构建安装包、独立复核清单与 SHA-256，并上传 14 天保留的 Actions Artifact。
+
+标签工作流只生成经过验证的构建产物，不创建、覆盖或修改 GitHub Release。正式发布仍需独立授权，避免重复发布或覆盖人工确认过的说明和附件。
+
 ## v1.10.0 已有项目安全接入预检
 
 接入已经开发一段时间的项目时，先运行纯只读预检。预检不会创建 `.codex-orchestrator`、分支或工作树，也不会修改 `.gitignore`、Git 配置或项目文件：
@@ -53,7 +59,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File '.\skill\codex-project-o
 
 绑定会核对仓库根目录、工作树路径、分支、HEAD、基线提交和干净状态。两个活动开发任务不得共用工作树或分支。本版本不会自动创建、删除、提交、合并或推送 Git 内容。
 
-## v1.10.0 安装与升级
+## v1.11.0 安装与升级
 
 正式安装包包含 Skill、安装器、可恢复卸载器、文件清单和 SHA-256 校验值。普通用户请按照 [`docs/INSTALL.md`](docs/INSTALL.md) 操作。安装不需要 Python、`jsonschema` 或 PyYAML。
 

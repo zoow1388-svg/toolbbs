@@ -1,5 +1,11 @@
 # 自动化多窗口项目总控架构
 
+## v1.11.0 远程验证架构
+
+本地与远程验证统一进入 `tests/run-validation.ps1`，避免在 GitHub Actions YAML 中复制测试顺序或漏掉校验阶段。入口按语法、Schema、Skill、Pester 的固定顺序失败即停，并把摘要与 NUnit XML 写入被 Git 忽略的 `TestResults/`；Python 依赖由 `tests/requirements-validation.txt` 锁定，Pester 在 CI 中固定为兼容现有测试语法的 4.10.1，并使用 Windows PowerShell 5.1 执行。
+
+`ci.yml` 只读取仓库并验证 PR 与 `main`，且以 `always()` 上传已经产生的测试证据。`release-validation.yml` 只在 `v*` 标签上运行，先证明标签与 Skill 版本一致，再重复完整验证和安装包构建；`verify-release-package.ps1` 随后重新计算外部 SHA-256，并逐项复核包内清单的大小与哈希，最后上传短期 Artifact。两个工作流都使用最小 `contents: read` 权限，不自动创建 Release、推送提交或修改分支保护规则。
+
 ## v1.10.0 已有项目接入预检
 
 `test-project-readiness.ps1` 在任何状态初始化之前只读检查既有项目，并输出符合 `project-readiness.schema.json` 的 JSON。它不把报告写入目标项目，不修改 Git 配置或忽略规则，也不创建分支和工作树。报告包含 15 分钟有效期，保存位置由调用方选择。

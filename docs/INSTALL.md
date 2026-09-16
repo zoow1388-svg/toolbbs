@@ -9,11 +9,11 @@
 
 ## 安装
 
-1. 从 GitHub Release 下载 `codex-project-orchestrator-v1.10.0.zip` 和对应的 `.sha256` 文件。
+1. 从 GitHub Release 下载 `codex-project-orchestrator-v1.11.0.zip` 和对应的 `.sha256` 文件。
 2. 在文件所在目录验证 SHA-256：
 
 ```powershell
-Get-FileHash -Algorithm SHA256 '.\codex-project-orchestrator-v1.10.0.zip'
+Get-FileHash -Algorithm SHA256 '.\codex-project-orchestrator-v1.11.0.zip'
 ```
 
 3. 确认输出与 `.sha256` 文件中的值一致，然后解压 ZIP。
@@ -41,7 +41,9 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File '.\install.ps1' -AllowUp
 
 如果安装失败，安装器会自动把旧目录移回原位置。同版本且内容完全一致时，重复运行不会修改任何文件。
 
-升级到 v1.10.0 后，先对已有项目运行 `manage-workflow.ps1 -Action preflight` 并把 JSON 保存到项目外部。预检只输出兼容性 JSON，不创建状态目录，也不修改 Git 忽略规则。新接入的 Git 项目初始化时必须传入这份 15 分钟内生成的 `compatible` 报告；初始化会重新核对现场，变化后必须重新预检。已有项目状态仍会在下一次受控写入时补充 Git 配置和任务字段；空的工作树配置采用项目相邻目录，已有非空配置保持不变。旧的已完成记录不会被伪造为新证据。
+升级到 v1.11.0 后，先对已有项目运行 `manage-workflow.ps1 -Action preflight` 并把 JSON 保存到项目外部。预检只输出兼容性 JSON，不创建状态目录，也不修改 Git 忽略规则。新接入的 Git 项目初始化时必须传入这份 15 分钟内生成的 `compatible` 报告；初始化会重新核对现场，变化后必须重新预检。已有项目状态仍会在下一次受控写入时补充 Git 配置和任务字段；空的工作树配置采用项目相邻目录，已有非空配置保持不变。旧的已完成记录不会被伪造为新证据。
+
+仓库维护者可运行 `tests/run-validation.ps1` 执行与远程 CI 相同的验证。标签工作流产生的 Actions Artifact 不是正式 Release；正式发布前仍需核对 ZIP 与 `.sha256` 并取得独立发布授权。
 
 安装完成后可核对版本：
 
@@ -49,7 +51,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File '.\install.ps1' -AllowUp
 Get-Content '.\codex-project-orchestrator\VERSION'
 ```
 
-预期输出为 `1.10.0`。
+预期输出为 `1.11.0`。
 
 ## 卸载
 

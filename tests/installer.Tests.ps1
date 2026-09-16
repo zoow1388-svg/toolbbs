@@ -2,6 +2,7 @@
 $installer = Join-Path $projectRoot 'installer\install.ps1'
 $uninstaller = Join-Path $projectRoot 'installer\uninstall.ps1'
 $builder = Join-Path $projectRoot 'installer\build-release.ps1'
+$packageVerifier = Join-Path $projectRoot 'tests\verify-release-package.ps1'
 $skillSource = Join-Path $projectRoot 'skill\codex-project-orchestrator'
 $skillVersion = (Get-Content -LiteralPath (Join-Path $skillSource 'VERSION') -Raw -Encoding UTF8).Trim()
 
@@ -57,6 +58,8 @@ Describe 'versioned installer lifecycle' {
         $archive = Join-Path $output "codex-project-orchestrator-v$skillVersion.zip"
         Test-Path -LiteralPath $archive | Should Be $true
         Test-Path -LiteralPath "$archive.sha256" | Should Be $true
+        & $packageVerifier -ArchivePath $archive -ChecksumPath "$archive.sha256" -ExpectedVersion $skillVersion
+        $LASTEXITCODE | Should Be 0
         { & $builder -OutputDirectory $output } | Should Throw
     }
 }
