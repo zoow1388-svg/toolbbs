@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory=$true)][ValidateSet('initialize','configure-controller','takeover-controller','register','transition','prepare-dispatch','claim-action','renew-action','complete-action','fail-action','resolve-action','authorize-action-retry','begin-external-action','complete-external-action','cancel-external-action','record-sent','record-observation','record-wait','record-ack','record-callback','record-callback-ack','record-result','verify-result','reconcile','show','audit')][string]$Action,
+    [Parameter(Mandatory=$true)][ValidateSet('initialize','configure-controller','takeover-controller','register','bind-worktree','transition','prepare-dispatch','claim-action','renew-action','complete-action','fail-action','resolve-action','authorize-action-retry','begin-external-action','complete-external-action','cancel-external-action','record-sent','record-observation','record-wait','record-ack','record-callback','record-callback-ack','record-result','verify-result','reconcile','show','audit')][string]$Action,
     [Parameter(Mandatory=$true)][string]$ProjectPath,
     [string]$WorkflowId,[string]$TaskId,[string]$ThreadId,[string]$HostId='local',[string]$ControllerThreadId,[string]$ControllerHostId='local',[string]$ExpectedControllerThreadId,[string]$ExpectedControllerHostId='local',[int64]$ExpectedControllerEpoch,[string]$TakeoverReason,
     [ValidateSet('analyst','developer','tester','reviewer')][string]$Role,
@@ -10,7 +10,8 @@ param(
     [string]$DispatchId,[string]$CallbackEventId,[string]$MessageId,[string]$ResultMessageId,[string]$Cursor,[string]$ReceiptPath,
     [string]$ObservedProjectPath,[string]$ObservedStatus,[string]$ObservationPath,[string]$SnapshotPath,
     [ValidateSet('dispatch_send','callback_ack')][string]$ExternalActionType,[string]$ExternalActionId,[string]$EvidencePath,
-    [string]$PlanPath,[string]$ActionId,[string]$ExecutionId,[int]$LeaseSeconds=300,[string]$ErrorMessage,[ValidateSet('abandoned','reconciled')][string]$Resolution
+    [string]$PlanPath,[string]$ActionId,[string]$ExecutionId,[int]$LeaseSeconds=300,[string]$ErrorMessage,[ValidateSet('abandoned','reconciled')][string]$Resolution,
+    [string]$BindingPath
 )
 
 $ErrorActionPreference = 'Stop'
@@ -26,6 +27,7 @@ switch ($Action) {
         $fileList = @($AllowedFiles -split ',' | Where-Object { $_ } | ForEach-Object { $_.Trim() })
         Register-WorkflowTask -ProjectPath $ProjectPath -TaskId $TaskId -ThreadId $ThreadId -HostId $HostId -Role $Role -Objective $Objective -Authorization $Authorization -BaseRevision $BaseRevision -DependsOn $dependencyList -AllowedFiles $fileList -RepairOf $RepairOf
     }
+    'bind-worktree' { if(-not $TaskId -or -not $BindingPath){throw 'TaskId and BindingPath are required.'};Set-WorkflowTaskWorktree -ProjectPath $ProjectPath -TaskId $TaskId -BindingPath $BindingPath }
     'transition' { if (-not $TaskId -or -not $ToStatus -or -not $Reason) { throw 'TaskId, ToStatus, and Reason are required.' }; if ($Verified -or $RawResultPath -or $NormalizedResultPath) { throw 'Result evidence cannot be trusted through transition; use verify-result first.' }; Set-WorkflowTaskState -ProjectPath $ProjectPath -TaskId $TaskId -ToStatus $ToStatus -Reason $Reason }
     'prepare-dispatch' { if (-not $TaskId) { throw 'TaskId is required.' }; New-WorkflowDispatch -ProjectPath $ProjectPath -TaskId $TaskId | ConvertTo-Json -Depth 20 }
     'claim-action' { if(-not $PlanPath -or -not $ActionId){throw 'PlanPath and ActionId are required.'};Claim-WorkflowAction -ProjectPath $ProjectPath -PlanPath $PlanPath -ActionId $ActionId -ExpectedControllerEpoch $ExpectedControllerEpoch -LeaseSeconds $LeaseSeconds|ConvertTo-Json -Depth 20 }

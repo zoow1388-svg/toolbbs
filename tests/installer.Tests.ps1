@@ -3,8 +3,9 @@ $installer = Join-Path $projectRoot 'installer\install.ps1'
 $uninstaller = Join-Path $projectRoot 'installer\uninstall.ps1'
 $builder = Join-Path $projectRoot 'installer\build-release.ps1'
 $skillSource = Join-Path $projectRoot 'skill\codex-project-orchestrator'
+$skillVersion = (Get-Content -LiteralPath (Join-Path $skillSource 'VERSION') -Raw -Encoding UTF8).Trim()
 
-Describe 'v1.4.1 installer lifecycle' {
+Describe 'versioned installer lifecycle' {
     BeforeEach {
         $script:testRoot = Join-Path $projectRoot ("TestResults\installer-" + [guid]::NewGuid().ToString('N'))
         $skillsRoot = Join-Path $script:testRoot 'skills'
@@ -21,7 +22,7 @@ Describe 'v1.4.1 installer lifecycle' {
         & $installer -SourcePath $skillSource -DestinationRoot $skillsRoot
         $destination = Join-Path $skillsRoot 'codex-project-orchestrator'
         Test-Path -LiteralPath (Join-Path $destination 'SKILL.md') | Should Be $true
-        (Get-Content -LiteralPath (Join-Path $destination 'VERSION') -Raw).Trim() | Should Be '1.4.1'
+        (Get-Content -LiteralPath (Join-Path $destination 'VERSION') -Raw).Trim() | Should Be $skillVersion
         $before = (Get-FileHash -LiteralPath (Join-Path $destination 'SKILL.md') -Algorithm SHA256).Hash
         & $installer -SourcePath $skillSource -DestinationRoot $skillsRoot
         $after = (Get-FileHash -LiteralPath (Join-Path $destination 'SKILL.md') -Algorithm SHA256).Hash
@@ -53,7 +54,7 @@ Describe 'v1.4.1 installer lifecycle' {
     It 'builds a versioned archive, manifest, and checksum without overwriting output' {
         $output = Join-Path $script:testRoot 'dist'
         & $builder -OutputDirectory $output
-        $archive = Join-Path $output 'codex-project-orchestrator-v1.4.1.zip'
+        $archive = Join-Path $output "codex-project-orchestrator-v$skillVersion.zip"
         Test-Path -LiteralPath $archive | Should Be $true
         Test-Path -LiteralPath "$archive.sha256" | Should Be $true
         { & $builder -OutputDirectory $output } | Should Throw

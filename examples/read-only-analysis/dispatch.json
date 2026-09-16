@@ -9,6 +9,7 @@
   "repair_of": null,
   "project_path": "D:\\example-project",
   "base_revision": "unborn",
+  "worktree": null,
   "objective": "只读分析项目结构",
   "depends_on": [],
   "dependency_revisions": [],

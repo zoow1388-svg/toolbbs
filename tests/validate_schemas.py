@@ -29,6 +29,15 @@ pairs = {
     "callback-receipt": load_json(EXAMPLES / "callback-receipt.json"),
     "external-action": load_json(EXAMPLES / "external-action.json"),
     "action-execution": load_json(EXAMPLES / "action-execution.json"),
+    "worktree-binding": {
+        "repository_root": "D:\\example-project",
+        "worktree_path": "D:\\worktrees\\dev-001",
+        "branch_name": "codex/dev-001",
+        "head_revision": "a" * 40,
+        "is_detached": False,
+        "is_dirty": False,
+        "inspected_at": "2026-09-16T00:00:00Z",
+    },
 }
 
 for name, document in pairs.items():
@@ -56,4 +65,4 @@ except jsonschema.ValidationError:
 else:
     raise AssertionError("Object changed_files entry unexpectedly passed validation")
 
-print("SCHEMA VALID: 12 positive, 2 negative")
+print("SCHEMA VALID: 13 positive, 2 negative")

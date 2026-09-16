@@ -87,6 +87,9 @@ function Add-Defaults {
     if($Workflow.PSObject.Properties.Match('controller_epoch').Count -eq 0){Add-Member -InputObject $Workflow -NotePropertyName controller_epoch -NotePropertyValue $(if([string]::IsNullOrWhiteSpace([string]$Workflow.controller_thread_id)){0}else{1})}
     if($Workflow.PSObject.Properties.Match('controller_history').Count -eq 0){Add-Member -InputObject $Workflow -NotePropertyName controller_history -NotePropertyValue @()}
     foreach ($task in $Tasks) {
+        foreach($name in @('worktree_binding_path','worktree_binding_sha256','worktree_path','branch_name','worktree_head_revision','worktree_bound_at')){
+            if($task.PSObject.Properties.Match($name).Count -eq 0){Add-Member -InputObject $task -NotePropertyName $name -NotePropertyValue $null}
+        }
         if($task.PSObject.Properties.Match('repair_of').Count -eq 0){Add-Member -InputObject $task -NotePropertyName repair_of -NotePropertyValue $null}
         if ($task.PSObject.Properties.Match('dispatch_count').Count -eq 0) { Add-Member -InputObject $task -NotePropertyName dispatch_count -NotePropertyValue 0 }
         if ($task.PSObject.Properties.Match('raw_result_path').Count -eq 0) { Add-Member -InputObject $task -NotePropertyName raw_result_path -NotePropertyValue $null }
@@ -117,7 +120,24 @@ function Add-Defaults {
             Add-Member -InputObject $task -NotePropertyName verification_status -NotePropertyValue $verificationStatus
         }
     }
-    if ([int]$Workflow.state_version -lt 13) { $Workflow.state_version = 13 }
+    if ([int]$Workflow.state_version -lt 14) { $Workflow.state_version = 14 }
+}
+
+function Get-LiveWorktreeIdentity {
+    param([Parameter(Mandatory=$true)][string]$WorktreePath)
+    $resolved=[IO.Path]::GetFullPath($WorktreePath)
+    if(-not(Test-Path -LiteralPath $resolved -PathType Container)){throw "Worktree path not found: $resolved"}
+    $top=(& git -C $resolved rev-parse --show-toplevel 2>$null)
+    if($LASTEXITCODE -ne 0 -or [IO.Path]::GetFullPath($top.Trim()) -ne $resolved){throw 'Bound path is not a Git worktree root.'}
+    $inventory=@(& git -C $resolved worktree list --porcelain)
+    if($LASTEXITCODE -ne 0){throw 'Unable to read Git worktree inventory.'}
+    $roots=@($inventory|Where-Object{$_ -like 'worktree *'}|ForEach-Object{[IO.Path]::GetFullPath($_.Substring(9))})
+    if($resolved -notin $roots){throw 'Bound path is not registered as a Git worktree.'}
+    $branch=(& git -C $resolved symbolic-ref --quiet --short HEAD 2>$null)
+    if($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($branch)){throw 'Detached HEAD worktrees are not allowed.'}
+    $head=(& git -C $resolved rev-parse HEAD).Trim().ToLowerInvariant()
+    if($LASTEXITCODE -ne 0){throw 'Unable to resolve worktree HEAD.'}
+    [pscustomobject][ordered]@{repository_root=$roots[0];worktree_path=$resolved;branch_name=$branch.Trim();head_revision=$head;is_dirty=(@(& git -C $resolved status --porcelain=v1).Count -gt 0)}
 }
 
 function Write-Event {
@@ -136,7 +156,7 @@ function Initialize-WorkflowState {
         $workflowPath = Join-Path $state 'workflow.json'
         if (Test-Path -LiteralPath $workflowPath) { throw 'Workflow already exists.' }
         $now = Get-UtcTimestamp
-        $workflow = [ordered]@{ workflow_id=$WorkflowId; project_path=$resolved; state_version=13; controller_thread_id=$(if([string]::IsNullOrWhiteSpace($ControllerThreadId)){$null}else{$ControllerThreadId}); controller_host_id=$(if([string]::IsNullOrWhiteSpace($ControllerThreadId)){$null}else{$ControllerHostId}); controller_epoch=$(if([string]::IsNullOrWhiteSpace($ControllerThreadId)){0}else{1}); controller_history=@(); status='draft'; current_stage='analysis'; authorization='read-only'; event_sequence=0; created_at=$now; updated_at=$now }
+        $workflow = [ordered]@{ workflow_id=$WorkflowId; project_path=$resolved; state_version=14; controller_thread_id=$(if([string]::IsNullOrWhiteSpace($ControllerThreadId)){$null}else{$ControllerThreadId}); controller_host_id=$(if([string]::IsNullOrWhiteSpace($ControllerThreadId)){$null}else{$ControllerHostId}); controller_epoch=$(if([string]::IsNullOrWhiteSpace($ControllerThreadId)){0}else{1}); controller_history=@(); status='draft'; current_stage='analysis'; authorization='read-only'; event_sequence=0; created_at=$now; updated_at=$now }
         $tasks = @()
         Write-Event $state $workflow 'workflow_initialized' $null $null 'draft' 'initialization'
         Write-JsonAtomic $workflow $workflowPath
@@ -370,11 +390,40 @@ function Register-WorkflowTask {
         $activeFiles = @($tasks | Where-Object { $_.role -eq 'developer' -and $_.status -notin $script:TerminalStates } | ForEach-Object { $_.allowed_files })
         $overlap = @($AllowedFiles | Where-Object { $_ -in $activeFiles })
         if ($Role -eq 'developer' -and $overlap.Count -gt 0) { throw "File ownership conflict: $($overlap -join ', ')" }
-        $task = [ordered]@{ task_id=$TaskId; thread_id=$ThreadId; host_id=$HostId; role=$Role; repair_of=$(if([string]::IsNullOrWhiteSpace($RepairOf)){$null}else{$RepairOf}); status='draft'; depends_on=@($DependsOn); project_path=$workflow.project_path; base_revision=$BaseRevision; allowed_files=@($AllowedFiles); objective=$Objective; authorization=$Authorization; repair_count=0; dispatch_count=0; dispatch_id=$null; delivery_status='not-prepared'; dispatch_path=$null; sent_message_id=$null; send_receipt_path=$null; send_receipt_sha256=$null; result_message_id=$null; read_cursor=$null; wait_revision=$null; wait_snapshot_path=$null; wait_snapshot_sha256=$null; latest_turn_id=$null; latest_turn_status=$null; latest_item_id=$null; latest_item_phase=$null; result_truncated=$false; callback_event_id=$null; callback_target_thread_id=$null; callback_target_host_id=$null; dispatch_controller_epoch=$null; callback_status='not-prepared'; callback_receipt_path=$null; callback_receipt_sha256=$null; callback_received_at=$null; callback_ack_receipt_path=$null; callback_ack_receipt_sha256=$null; callback_acknowledged_at=$null; observation_path=$null; observation_sha256=$null; observed_status=$null; observed_at=$null; dispatched_at=$null; acknowledged_at=$null; result_received_at=$null; raw_result_path=$null; raw_result_sha256=$null; normalized_result_path=$null; normalized_result_sha256=$null; verification_receipt_path=$null; verification_receipt_sha256=$null; verification_status='unverified'; verified_at=$null; verified=$false; updated_at=(Get-UtcTimestamp) }
+        $task = [ordered]@{ task_id=$TaskId; thread_id=$ThreadId; host_id=$HostId; role=$Role; repair_of=$(if([string]::IsNullOrWhiteSpace($RepairOf)){$null}else{$RepairOf}); status='draft'; depends_on=@($DependsOn); project_path=$workflow.project_path; base_revision=$BaseRevision; worktree_binding_path=$null; worktree_binding_sha256=$null; worktree_path=$null; branch_name=$null; worktree_head_revision=$null; worktree_bound_at=$null; allowed_files=@($AllowedFiles); objective=$Objective; authorization=$Authorization; repair_count=0; dispatch_count=0; dispatch_id=$null; delivery_status='not-prepared'; dispatch_path=$null; sent_message_id=$null; send_receipt_path=$null; send_receipt_sha256=$null; result_message_id=$null; read_cursor=$null; wait_revision=$null; wait_snapshot_path=$null; wait_snapshot_sha256=$null; latest_turn_id=$null; latest_turn_status=$null; latest_item_id=$null; latest_item_phase=$null; result_truncated=$false; callback_event_id=$null; callback_target_thread_id=$null; callback_target_host_id=$null; dispatch_controller_epoch=$null; callback_status='not-prepared'; callback_receipt_path=$null; callback_receipt_sha256=$null; callback_received_at=$null; callback_ack_receipt_path=$null; callback_ack_receipt_sha256=$null; callback_acknowledged_at=$null; observation_path=$null; observation_sha256=$null; observed_status=$null; observed_at=$null; dispatched_at=$null; acknowledged_at=$null; result_received_at=$null; raw_result_path=$null; raw_result_sha256=$null; normalized_result_path=$null; normalized_result_sha256=$null; verification_receipt_path=$null; verification_receipt_sha256=$null; verification_status='unverified'; verified_at=$null; verified=$false; updated_at=(Get-UtcTimestamp) }
         if($null -ne $repairSource){$repairSource.repair_count=[int]$repairSource.repair_count+1;$repairSource.updated_at=Get-UtcTimestamp}
         $tasks += [pscustomobject]$task
         Write-Event $state $workflow 'task_registered' $TaskId $null 'draft' 'registration'
         $workflow.updated_at = Get-UtcTimestamp; Write-JsonAtomic $workflow $workflowPath; Write-JsonAtomic $tasks $tasksPath
+    }
+}
+
+function Set-WorkflowTaskWorktree {
+    param([string]$ProjectPath,[string]$TaskId,[string]$BindingPath)
+    $state=Join-Path ([IO.Path]::GetFullPath($ProjectPath)) '.codex-orchestrator'
+    Invoke-WithStateLock $state {
+        $workflowPath=Join-Path $state 'workflow.json';$tasksPath=Join-Path $state 'tasks.json'
+        $workflow=Read-StateJson $workflowPath;$tasks=@(Read-StateJson $tasksPath|ForEach-Object{$_});Add-Defaults $workflow $tasks
+        $task=@($tasks|Where-Object{$_.task_id -eq $TaskId});if($task.Count -ne 1){throw "Task not found: $TaskId"};$task=$task[0]
+        if($task.role -ne 'developer'){throw 'Only developer tasks can bind a worktree.'}
+        if($task.status -notin @('draft','awaiting_approval','approved') -or $task.delivery_status -ne 'not-prepared'){throw 'Worktree must be bound before dispatch.'}
+        $source=[IO.Path]::GetFullPath($BindingPath);if(-not(Test-Path -LiteralPath $source -PathType Leaf)){throw 'Worktree binding evidence not found.'}
+        $binding=Read-StateJson $source
+        foreach($name in @('repository_root','worktree_path','branch_name','head_revision','is_detached','is_dirty','inspected_at')){if($binding.PSObject.Properties.Match($name).Count -eq 0){throw "Worktree binding missing field: $name"}}
+        if($binding.is_detached -or $binding.is_dirty){throw 'Worktree must use a branch and be clean when bound.'}
+        if([IO.Path]::GetFullPath($binding.repository_root) -ne [IO.Path]::GetFullPath($workflow.project_path)){throw 'Worktree belongs to another repository root.'}
+        $live=Get-LiveWorktreeIdentity $binding.worktree_path
+        if($live.repository_root -ne [IO.Path]::GetFullPath($workflow.project_path) -or $live.branch_name -ne $binding.branch_name -or $live.head_revision -ne $binding.head_revision -or $live.is_dirty){throw 'Worktree binding does not match current Git state.'}
+        if($task.base_revision -ne $live.head_revision){throw 'Worktree HEAD does not match task base revision.'}
+        $active=@($tasks|Where-Object{$_.task_id -ne $TaskId -and $_.role -eq 'developer' -and $_.status -notin $script:TerminalStates})
+        if(@($active|Where-Object{![string]::IsNullOrWhiteSpace($_.worktree_path) -and [IO.Path]::GetFullPath($_.worktree_path) -eq $live.worktree_path}).Count){throw 'Worktree path is already bound to an active developer task.'}
+        if(@($active|Where-Object{![string]::IsNullOrWhiteSpace($_.branch_name) -and $_.branch_name -eq $live.branch_name}).Count){throw 'Branch is already bound to an active developer task.'}
+        $directory=Join-Path $state 'worktrees';$target=Join-Path $directory "$TaskId.json"
+        if(Test-Path -LiteralPath $target){throw 'Task worktree binding already exists.'}
+        Write-JsonAtomic $binding $target
+        $task.worktree_binding_path=[IO.Path]::GetFullPath($target);$task.worktree_binding_sha256=(Get-FileHash $target -Algorithm SHA256).Hash.ToLowerInvariant();$task.worktree_path=$live.worktree_path;$task.branch_name=$live.branch_name;$task.worktree_head_revision=$live.head_revision;$task.worktree_bound_at=Get-UtcTimestamp;$task.project_path=$live.worktree_path;$task.updated_at=Get-UtcTimestamp
+        Write-Event $state $workflow 'worktree_bound' $TaskId $null $live.branch_name $live.worktree_path
+        $workflow.updated_at=Get-UtcTimestamp;Write-JsonAtomic $workflow $workflowPath;Write-JsonAtomic $tasks $tasksPath
     }
 }
 
@@ -389,6 +438,14 @@ function New-WorkflowDispatch {
         if ($task.status -ne 'approved') { throw 'Only an approved task can be prepared for dispatch.' }
         if([string]::IsNullOrWhiteSpace($workflow.controller_thread_id) -or [string]::IsNullOrWhiteSpace($workflow.controller_host_id)){throw 'Workflow controller identity must be configured before dispatch.'}
         if ($task.delivery_status -ne 'not-prepared' -or [int]$task.dispatch_count -gt 0) { throw 'Task dispatch was already prepared or sent.' }
+        $worktree=$null
+        if($task.role -eq 'developer' -and $task.base_revision -notin @('unborn','unknown','unavailable')){
+            if([string]::IsNullOrWhiteSpace($task.worktree_path)){throw 'Developer task requires a verified worktree binding before dispatch.'}
+            if(-not(Test-Path -LiteralPath $task.worktree_binding_path) -or (Get-FileHash $task.worktree_binding_path -Algorithm SHA256).Hash.ToLowerInvariant() -ne $task.worktree_binding_sha256){throw 'Worktree binding evidence is missing or changed.'}
+            $live=Get-LiveWorktreeIdentity $task.worktree_path
+            if($live.branch_name -ne $task.branch_name -or $live.head_revision -ne $task.base_revision -or $live.is_dirty){throw 'Worktree branch, HEAD, or cleanliness changed before dispatch.'}
+            $worktree=[ordered]@{path=$task.worktree_path;branch_name=$task.branch_name;head_revision=$task.worktree_head_revision;binding_path=$task.worktree_binding_path;binding_sha256=$task.worktree_binding_sha256}
+        }
         $dependencyRevisions=[Collections.Generic.List[object]]::new()
         foreach ($dependency in @($task.depends_on)) {
             $dep = @($tasks | Where-Object { $_.task_id -eq $dependency })
@@ -403,7 +460,7 @@ function New-WorkflowDispatch {
         $dispatchId = "$TaskId-$([guid]::NewGuid().ToString('N'))"
         $callbackEventId="$dispatchId`:completion"
         $callback=[ordered]@{event_id=$callbackEventId;target_thread_id=$workflow.controller_thread_id;target_host_id=$workflow.controller_host_id;status='completed'}
-        $dispatch = [ordered]@{ dispatch_id=$dispatchId; workflow_id=$workflow.workflow_id; controller_epoch=[int64]$workflow.controller_epoch; task_id=$task.task_id; thread_id=$task.thread_id; host_id=$task.host_id; role=$task.role; repair_of=$task.repair_of; project_path=$task.project_path; base_revision=$task.base_revision; objective=$task.objective; depends_on=@($task.depends_on); dependency_revisions=@($dependencyRevisions); allowed_files=@($task.allowed_files); authorization=$task.authorization; callback=$callback; created_at=(Get-UtcTimestamp) }
+        $dispatch = [ordered]@{ dispatch_id=$dispatchId; workflow_id=$workflow.workflow_id; controller_epoch=[int64]$workflow.controller_epoch; task_id=$task.task_id; thread_id=$task.thread_id; host_id=$task.host_id; role=$task.role; repair_of=$task.repair_of; project_path=$task.project_path; base_revision=$task.base_revision; worktree=$worktree; objective=$task.objective; depends_on=@($task.depends_on); dependency_revisions=@($dependencyRevisions); allowed_files=@($task.allowed_files); authorization=$task.authorization; callback=$callback; created_at=(Get-UtcTimestamp) }
         $dispatchDirectory = Join-Path $state 'dispatches'; $dispatchPath = Join-Path $dispatchDirectory "$dispatchId.json"
         Write-JsonAtomic $dispatch $dispatchPath
         $task.dispatch_id = $dispatchId; $task.dispatch_path = [System.IO.Path]::GetFullPath($dispatchPath); $task.delivery_status = 'prepared'; $task.callback_event_id=$callbackEventId;$task.callback_target_thread_id=$workflow.controller_thread_id;$task.callback_target_host_id=$workflow.controller_host_id;$task.dispatch_controller_epoch=[int64]$workflow.controller_epoch;$task.callback_status='prepared';$task.updated_at = Get-UtcTimestamp
@@ -669,6 +726,9 @@ function Test-WorkflowStateIntegrity {
     if ([int]$workflow.event_sequence -ne $events.Count) { throw 'Workflow event_sequence differs from event log.' }
     if (@($tasks | Group-Object task_id | Where-Object Count -gt 1).Count -gt 0) { throw 'Duplicate task_id detected.' }
     if (@($tasks | Group-Object thread_id | Where-Object Count -gt 1).Count -gt 0) { throw 'Duplicate thread_id detected.' }
+    $activeDevelopers=@($tasks|Where-Object{$_.role -eq 'developer' -and $_.status -notin $script:TerminalStates -and -not [string]::IsNullOrWhiteSpace($_.worktree_path)})
+    if(@($activeDevelopers|Group-Object worktree_path|Where-Object Count -gt 1).Count){throw 'Duplicate active developer worktree path detected.'}
+    if(@($activeDevelopers|Group-Object branch_name|Where-Object Count -gt 1).Count){throw 'Duplicate active developer branch detected.'}
     $externalActions=@(Read-ExternalActions $state)
     if(@($externalActions|Group-Object action_id|Where-Object Count -gt 1).Count -gt 0){throw 'Duplicate external action ID detected.'}
     foreach($externalAction in $externalActions){
@@ -702,6 +762,9 @@ function Test-WorkflowStateIntegrity {
     }
     foreach($group in @($actionExecutions|Group-Object operation_sha256)){ $ordered=@($group.Group|Sort-Object attempt);for($index=0;$index -lt $ordered.Count;$index++){if([int]$ordered[$index].attempt -ne ($index+1)){throw "Action execution attempt sequence is invalid: $($group.Name)"}} }
     foreach ($task in $tasks) {
+        if(-not [string]::IsNullOrWhiteSpace($task.worktree_binding_path)){
+            if($task.role -ne 'developer' -or -not(Test-Path -LiteralPath $task.worktree_binding_path) -or (Get-FileHash $task.worktree_binding_path -Algorithm SHA256).Hash.ToLowerInvariant() -ne $task.worktree_binding_sha256){throw "Task worktree binding evidence mismatch: $($task.task_id)"}
+        }
         if ($task.delivery_status -ne 'not-prepared' -and ([string]::IsNullOrWhiteSpace($task.dispatch_id) -or [string]::IsNullOrWhiteSpace($task.dispatch_path) -or -not (Test-Path -LiteralPath $task.dispatch_path))) { throw "Task dispatch evidence is incomplete: $($task.task_id)" }
         if ($task.delivery_status -in @('sent','acknowledged','result_received') -and ([string]::IsNullOrWhiteSpace($task.send_receipt_path) -or [string]::IsNullOrWhiteSpace($task.send_receipt_sha256) -or -not(Test-Path -LiteralPath $task.send_receipt_path) -or [string]::IsNullOrWhiteSpace($task.dispatched_at))) { throw "Task send evidence is incomplete: $($task.task_id)" }
         if(-not [string]::IsNullOrWhiteSpace($task.send_receipt_path) -and ((Get-FileHash -LiteralPath $task.send_receipt_path -Algorithm SHA256).Hash.ToLowerInvariant() -ne $task.send_receipt_sha256)){throw "Task send receipt hash mismatch: $($task.task_id)"}
@@ -744,4 +807,4 @@ function Get-WorkflowState {
     [ordered]@{workflow=$workflow;tasks=$tasks;external_actions=@(Read-ExternalActions $state);action_executions=@(Read-ActionExecutions $state)}
 }
 
-Export-ModuleMember -Function Initialize-WorkflowState,Set-WorkflowController,Set-WorkflowControllerTakeover,Register-WorkflowTask,Set-WorkflowTaskState,New-WorkflowDispatch,Start-WorkflowExternalAction,Complete-WorkflowExternalAction,Cancel-WorkflowExternalAction,Claim-WorkflowAction,Renew-WorkflowActionLease,Set-WorkflowActionExecutionResult,Resolve-WorkflowActionExecution,Authorize-WorkflowActionRetry,Confirm-WorkflowDispatchSent,Confirm-WorkflowAcknowledged,Receive-WorkflowCallback,Confirm-WorkflowCallbackAcknowledged,Receive-WorkflowResult,Confirm-WorkflowResultVerified,Record-WorkflowThreadObservation,Record-WorkflowWaitSnapshot,Get-WorkflowReconciliation,Get-WorkflowState,Test-WorkflowStateIntegrity
+Export-ModuleMember -Function Initialize-WorkflowState,Set-WorkflowController,Set-WorkflowControllerTakeover,Register-WorkflowTask,Set-WorkflowTaskWorktree,Set-WorkflowTaskState,New-WorkflowDispatch,Start-WorkflowExternalAction,Complete-WorkflowExternalAction,Cancel-WorkflowExternalAction,Claim-WorkflowAction,Renew-WorkflowActionLease,Set-WorkflowActionExecutionResult,Resolve-WorkflowActionExecution,Authorize-WorkflowActionRetry,Confirm-WorkflowDispatchSent,Confirm-WorkflowAcknowledged,Receive-WorkflowCallback,Confirm-WorkflowCallbackAcknowledged,Receive-WorkflowResult,Confirm-WorkflowResultVerified,Record-WorkflowThreadObservation,Record-WorkflowWaitSnapshot,Get-WorkflowReconciliation,Get-WorkflowState,Test-WorkflowStateIntegrity

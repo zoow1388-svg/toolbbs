@@ -2,7 +2,18 @@
 
 这是一个面向 Codex 桌面版的自动化多窗口项目总控 Skill：让一个总控任务通过不可变任务 ID 协调多个 Codex 任务，完成分析、开发、测试、审查、结果回传和中断恢复。项目当前只在 D 盘开发，不会自动安装到全局 Skill 目录。
 
-## v1.4.1 安装与升级
+## v1.5 Git Worktree 隔离
+
+开发任务使用真实 Git 提交作为基线时，必须绑定独立、干净且处于分支上的 Git Worktree。总控先生成检查证据，再登记到任务状态：
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File '.\skill\codex-project-orchestrator\scripts\inspect-worktree.ps1' -WorktreePath 'D:\工作树\DEV-001' -OutputPath 'D:\目标项目\worktree-DEV-001.json'
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File '.\skill\codex-project-orchestrator\scripts\manage-workflow.ps1' -Action bind-worktree -ProjectPath 'D:\目标项目' -TaskId 'DEV-001' -BindingPath 'D:\目标项目\worktree-DEV-001.json'
+```
+
+绑定会核对仓库根目录、工作树路径、分支、HEAD、基线提交和干净状态。两个活动开发任务不得共用工作树或分支。本版本不会自动创建、删除、提交、合并或推送 Git 内容。
+
+## v1.5.0 安装与升级
 
 正式安装包包含 Skill、安装器、可恢复卸载器、文件清单和 SHA-256 校验值。普通用户请按照 [`docs/INSTALL.md`](docs/INSTALL.md) 操作。安装不需要 Python、`jsonschema` 或 PyYAML。
 

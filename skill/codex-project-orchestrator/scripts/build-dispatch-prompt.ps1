@@ -6,7 +6,7 @@ param(
 
 $ErrorActionPreference='Stop'
 $dispatch=Get-Content -LiteralPath $DispatchPath -Raw -Encoding UTF8|ConvertFrom-Json
-foreach($name in @('dispatch_id','workflow_id','task_id','thread_id','host_id','role','project_path','base_revision','objective','depends_on','dependency_revisions','allowed_files','authorization','callback')){
+foreach($name in @('dispatch_id','workflow_id','task_id','thread_id','host_id','role','project_path','base_revision','worktree','objective','depends_on','dependency_revisions','allowed_files','authorization','callback')){
     if($dispatch.PSObject.Properties.Match($name).Count -eq 0){throw "Dispatch missing field: $name"}
 }
 foreach($name in @('event_id','target_thread_id','target_host_id','status')){if($dispatch.callback.PSObject.Properties.Match($name).Count -eq 0){throw "Dispatch callback missing field: $name"}}
@@ -24,6 +24,11 @@ $lines.Add("- 角色：$($dispatch.role)")
 $lines.Add("- 返修来源：$(if([string]::IsNullOrWhiteSpace([string]$dispatch.repair_of)){'无'}else{$dispatch.repair_of})")
 $lines.Add("- 项目：$($dispatch.project_path)")
 $lines.Add("- Git 基线：$($dispatch.base_revision)")
+if($null -ne $dispatch.worktree){
+    $lines.Add("- Git Worktree：$($dispatch.worktree.path)")
+    $lines.Add("- 工作分支：$($dispatch.worktree.branch_name)")
+    $lines.Add('- 开始修改前必须核对当前目录、分支、HEAD 和干净状态；任一不一致立即停止并回报。')
+}
 $lines.Add("- 授权：$($dispatch.authorization)");$lines.Add('')
 $lines.Add('## 目标');$lines.Add('');$lines.Add([string]$dispatch.objective);$lines.Add('')
 $lines.Add('## 依赖');$lines.Add(''); if(@($dispatch.depends_on).Count){foreach($item in @($dispatch.depends_on)){$lines.Add("- $item")}}else{$lines.Add('- 无')};$lines.Add('')
