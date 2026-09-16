@@ -10,7 +10,7 @@ if(-not(Test-WorkflowStateIntegrity -ProjectPath $resolvedProject)){throw 'Workf
 $plan=Get-Content -LiteralPath $PlanPath -Raw -Encoding UTF8|ConvertFrom-Json
 $workflowPath=Join-Path $state 'workflow.json';$tasksPath=Join-Path $state 'tasks.json'
 $workflow=Get-Content -LiteralPath $workflowPath -Raw -Encoding UTF8|ConvertFrom-Json
-if($plan.schema_version -ne 6 -or $plan.PSObject.Properties.Match('external_actions_sha256').Count -eq 0 -or $plan.PSObject.Properties.Match('action_executions_sha256').Count -eq 0){throw 'STALE_ACTION_PLAN: regenerate with controlled Git support.'}
+if($plan.schema_version -ne 7 -or $plan.PSObject.Properties.Match('external_actions_sha256').Count -eq 0 -or $plan.PSObject.Properties.Match('action_executions_sha256').Count -eq 0 -or $plan.PSObject.Properties.Match('git_actions_sha256').Count -eq 0){throw 'STALE_ACTION_PLAN: regenerate with Git transaction recovery support.'}
 if([IO.Path]::GetFullPath([string]$plan.project_path) -ne $resolvedProject){throw 'Action plan project does not match.'}
 if($plan.workflow_id -ne $workflow.workflow_id){throw 'Action plan workflow does not match.'}
 if([int64]$plan.controller_epoch -ne [int64]$workflow.controller_epoch -or $plan.controller_thread_id -ne $workflow.controller_thread_id -or $plan.controller_host_id -ne $workflow.controller_host_id){throw 'STALE_ACTION_PLAN: controller lease changed.'}
@@ -21,4 +21,6 @@ $actionsPath=Join-Path $state 'external-actions.json';$actionsHash=$(if(Test-Pat
 if($plan.external_actions_sha256 -ne $actionsHash){throw 'STALE_ACTION_PLAN: external action journal changed.'}
 $executionsPath=Join-Path $state 'action-executions.json';$executionsHash=$(if(Test-Path -LiteralPath $executionsPath){(Get-FileHash -LiteralPath $executionsPath -Algorithm SHA256).Hash.ToLowerInvariant()}else{$null})
 if($plan.action_executions_sha256 -ne $executionsHash){throw 'STALE_ACTION_PLAN: action execution journal changed.'}
+$gitActionsPath=Join-Path $state 'git-actions.json';$gitActionsHash=$(if(Test-Path -LiteralPath $gitActionsPath){(Get-FileHash -LiteralPath $gitActionsPath -Algorithm SHA256).Hash.ToLowerInvariant()}else{$null})
+if($plan.git_actions_sha256 -ne $gitActionsHash){throw 'STALE_ACTION_PLAN: Git action journal changed.'}
 Write-Output "CURRENT: workflow=$($workflow.workflow_id); sequence=$($workflow.event_sequence)"
