@@ -9,11 +9,11 @@
 
 ## 安装
 
-1. 从 GitHub Release 下载 `codex-project-orchestrator-v1.4.1.zip` 和对应的 `.sha256` 文件。
+1. 从 GitHub Release 下载 `codex-project-orchestrator-v1.6.0.zip` 和对应的 `.sha256` 文件。
 2. 在文件所在目录验证 SHA-256：
 
 ```powershell
-Get-FileHash -Algorithm SHA256 '.\codex-project-orchestrator-v1.4.1.zip'
+Get-FileHash -Algorithm SHA256 '.\codex-project-orchestrator-v1.6.0.zip'
 ```
 
 3. 确认输出与 `.sha256` 文件中的值一致，然后解压 ZIP。

@@ -3,7 +3,7 @@
   "$id": "dispatch.schema.json",
   "type": "object",
   "additionalProperties": false,
-  "required": ["dispatch_id", "workflow_id", "controller_epoch", "task_id", "thread_id", "host_id", "role", "project_path", "base_revision", "objective", "depends_on", "dependency_revisions", "allowed_files", "authorization", "callback", "created_at"],
+  "required": ["dispatch_id", "workflow_id", "controller_epoch", "task_id", "thread_id", "host_id", "role", "project_path", "base_revision", "worktree", "objective", "depends_on", "dependency_revisions", "allowed_files", "authorization", "callback", "created_at"],
   "properties": {
     "dispatch_id": {"type": "string", "minLength": 1},
     "workflow_id": {"type": "string", "minLength": 1},
@@ -15,6 +15,20 @@
     "repair_of": {"type": ["string", "null"]},
     "project_path": {"type": "string", "pattern": "^[A-Za-z]:\\\\"},
     "base_revision": {"type": "string", "minLength": 1},
+    "worktree": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["mode", "path", "branch_name", "head_revision", "is_detached", "binding_path", "binding_sha256"],
+      "properties": {
+        "mode": {"enum": ["developer", "verification"]},
+        "path": {"type": "string", "pattern": "^[A-Za-z]:\\\\"},
+        "branch_name": {"type": ["string", "null"], "minLength": 1},
+        "head_revision": {"type": "string", "pattern": "^[a-f0-9]{40,64}$"},
+        "is_detached": {"type": "boolean"},
+        "binding_path": {"type": "string", "minLength": 1},
+        "binding_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"}
+      }
+    },
     "objective": {"type": "string", "minLength": 1},
     "depends_on": {"type": "array", "uniqueItems": true, "items": {"type": "string"}},
     "dependency_revisions": {"type": "array", "items": {"type": "object", "additionalProperties": false, "required": ["task_id", "end_revision"], "properties": {"task_id": {"type": "string"}, "end_revision": {"type": "string", "minLength": 1}}}},

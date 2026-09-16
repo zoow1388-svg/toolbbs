@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "worktree-binding.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["mode", "repository_root", "worktree_path", "branch_name", "head_revision", "is_detached", "is_dirty", "inspected_at"],
+  "properties": {
+    "mode": {"enum": ["developer", "verification"]},
+    "repository_root": {"type": "string", "pattern": "^[A-Za-z]:\\\\"},
+    "worktree_path": {"type": "string", "pattern": "^[A-Za-z]:\\\\"},
+    "branch_name": {"type": ["string", "null"], "minLength": 1},
+    "head_revision": {"type": "string", "pattern": "^[a-f0-9]{40,64}$"},
+    "is_detached": {"type": "boolean"},
+    "is_dirty": {"type": "boolean"},
+    "inspected_at": {"type": "string", "format": "date-time"}
+  }
+}

@@ -39,7 +39,8 @@ foreach ($task in $tasks) {
     if ($task.role -notin $validRoles) { Add-ValidationError "$context invalid role: $($task.role)" }
     if ($task.status -notin $validStates) { Add-ValidationError "$context invalid status: $($task.status)" }
     if ($task.authorization -notin $validAuthorizations) { Add-ValidationError "$context invalid authorization: $($task.authorization)" }
-    if ($task.project_path -ne $workflow.project_path) { Add-ValidationError "$context project_path differs from workflow" }
+    $isBoundDeveloper=($task.role -eq 'developer' -and -not [string]::IsNullOrWhiteSpace([string]$task.worktree_path))
+    if((-not $isBoundDeveloper -and $task.project_path -ne $workflow.project_path) -or ($isBoundDeveloper -and $task.project_path -ne $task.worktree_path)){Add-ValidationError "$context project_path does not match its execution workspace"}
     if ([int]$task.repair_count -lt 0 -or [int]$task.repair_count -gt 1) { Add-ValidationError "$context repair_count must be 0 or 1" }
     if ($task.role -eq 'developer' -and $task.authorization -notin @('implementation-approved','git-approved','deployment-approved')) { Add-ValidationError "$context developer lacks implementation approval" }
     if ($task.PSObject.Properties.Match('delivery_status').Count -gt 0) {
@@ -49,6 +50,10 @@ foreach ($task in $tasks) {
         if ($task.delivery_status -eq 'result_received' -and [string]::IsNullOrWhiteSpace($task.result_message_id)) { Add-ValidationError "$context result_received requires result_message_id" }
     }
 }
+
+$activeBoundWorkspaces=@($tasks|Where-Object{$_.role -in @('developer','tester','reviewer') -and $_.status -notin @('completed','blocked','failed','cancelled','stale') -and -not [string]::IsNullOrWhiteSpace([string]$_.worktree_path)})
+foreach($group in @($activeBoundWorkspaces|Group-Object worktree_path|Where-Object Count -gt 1)){Add-ValidationError "active task worktree path conflict: $($group.Name)"}
+foreach($group in @($activeBoundWorkspaces|Where-Object{-not [string]::IsNullOrWhiteSpace([string]$_.branch_name)}|Group-Object branch_name|Where-Object Count -gt 1)){Add-ValidationError "active task branch conflict: $($group.Name)"}
 
 foreach ($task in $tasks) {
     foreach ($dependency in @($task.depends_on | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })) {
