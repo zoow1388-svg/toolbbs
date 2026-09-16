@@ -27,6 +27,8 @@ function New-WorkflowActionPlan {
     $externalActions=$(if(Test-Path -LiteralPath $externalActionsPath){@(Get-Content -LiteralPath $externalActionsPath -Raw -Encoding UTF8|ConvertFrom-Json|ForEach-Object{$_})}else{@()})
     $actionExecutionsPath=Join-Path $stateDirectory 'action-executions.json'
     $actionExecutions=$(if(Test-Path -LiteralPath $actionExecutionsPath){@(Get-Content -LiteralPath $actionExecutionsPath -Raw -Encoding UTF8|ConvertFrom-Json|ForEach-Object{$_})}else{@()})
+    $gitActionsPath=Join-Path $stateDirectory 'git-actions.json'
+    $gitActions=$(if(Test-Path -LiteralPath $gitActionsPath){@(Get-Content -LiteralPath $gitActionsPath -Raw -Encoding UTF8|ConvertFrom-Json|ForEach-Object{$_})}else{@()})
     $actions=[Collections.Generic.List[object]]::new();$waitTargets=[Collections.Generic.List[object]]::new()
     $sequence=[int64]$workflow.event_sequence
 
@@ -48,8 +50,16 @@ function New-WorkflowActionPlan {
     }
 
     $roleOrder=@{analyst=0;developer=1;tester=2;reviewer=3}
+    foreach($gitAction in @($gitActions|Sort-Object created_at)){
+        if($gitAction.status -eq 'prepared'){
+            Add-Action 'controlled_git' @($gitAction.task_id) 'manage-workflow:controlled-git' ([ordered]@{git_action_id=$gitAction.git_action_id;request_path=$gitAction.request_path;request_sha256=$gitAction.request_sha256;receipt_path=(Join-Path $stateDirectory "git-receipts\$($gitAction.operation_id).json")}) @('controlled Git receipt','unchanged request hash','unchanged repository baseline') $true 'git-approved' 'A journaled Git operation is ready for deterministic execution.'
+        }elseif($gitAction.status -eq 'failed'){
+            Add-Action 'manual_review' @($gitAction.task_id) 'inspect_git_action' ([ordered]@{git_action_id=$gitAction.git_action_id;error=$gitAction.error}) @('Git repository inspection','failure evidence','explicit retry decision') $false 'explicit-user-direction' 'A Git operation failed and must not be retried automatically.'
+        }
+    }
     $orderedTasks=@($tasks|Sort-Object @{Expression={$roleOrder[[string]$_.role]}},task_id)
     foreach($task in $orderedTasks){
+        if(@($gitActions|Where-Object{$_.task_id-eq$task.task_id-and$_.status-in@('prepared','failed')}).Count){continue}
         if($task.callback_status -eq 'received'){
             $attempts=@($externalActions|Where-Object{$_.task_id -eq $task.task_id -and $_.action_type -eq 'callback_ack'}|Sort-Object attempt)
             $attempt=$(if($attempts.Count){$attempts[-1]}else{$null})
@@ -139,8 +149,8 @@ function New-WorkflowActionPlan {
         Add-Action 'workflow_complete' @() 'report_completion' ([ordered]@{workflow_id=$workflow.workflow_id}) @('successful workflow audit','final delivery report') $false $null 'Every task is trusted complete.'
     }
     [pscustomobject][ordered]@{
-        schema_version=6;workflow_id=$workflow.workflow_id;project_path=$resolvedProject;controller_thread_id=$workflow.controller_thread_id;controller_host_id=$workflow.controller_host_id;controller_epoch=[int64]$workflow.controller_epoch;based_on_event_sequence=$sequence
-        workflow_state_sha256=(Get-FileSha256 $workflowPath);tasks_state_sha256=(Get-FileSha256 $tasksPath);external_actions_sha256=$(if(Test-Path -LiteralPath $externalActionsPath){Get-FileSha256 $externalActionsPath}else{$null});action_executions_sha256=$(if(Test-Path -LiteralPath $actionExecutionsPath){Get-FileSha256 $actionExecutionsPath}else{$null})
+        schema_version=7;workflow_id=$workflow.workflow_id;project_path=$resolvedProject;controller_thread_id=$workflow.controller_thread_id;controller_host_id=$workflow.controller_host_id;controller_epoch=[int64]$workflow.controller_epoch;based_on_event_sequence=$sequence
+        workflow_state_sha256=(Get-FileSha256 $workflowPath);tasks_state_sha256=(Get-FileSha256 $tasksPath);external_actions_sha256=$(if(Test-Path -LiteralPath $externalActionsPath){Get-FileSha256 $externalActionsPath}else{$null});action_executions_sha256=$(if(Test-Path -LiteralPath $actionExecutionsPath){Get-FileSha256 $actionExecutionsPath}else{$null});git_actions_sha256=$(if(Test-Path -LiteralPath $gitActionsPath){Get-FileSha256 $gitActionsPath}else{$null})
         generated_at=(Get-Date).ToUniversalTime().ToString('o');actions=@($actions)
     }
 }

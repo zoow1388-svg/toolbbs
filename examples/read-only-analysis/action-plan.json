@@ -1,5 +1,5 @@
 {
-  "schema_version": 6,
+  "schema_version": 7,
   "workflow_id": "WF-READONLY-001",
   "project_path": "D:\\example-project",
   "controller_thread_id": "controller-example",
@@ -10,6 +10,7 @@
   "tasks_state_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
   "external_actions_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
   "action_executions_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+  "git_actions_sha256": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
   "generated_at": "2026-09-15T00:00:00+08:00",
   "actions": [{
     "action_id": "WF-READONLY-001:2:request_authorization:ANALYSIS-001",

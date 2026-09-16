@@ -53,6 +53,15 @@ pairs = {
         "changed_files": ["src/app.ps1"], "test_evidence_sha256": None, "review_evidence_sha256": None,
         "push_performed": False, "force_performed": False, "status": "completed", "completed_at": "2026-09-16T00:00:00Z",
     },
+    "git-action": {
+        "git_action_id": "WF-001:1:DEV-001:create_worktree:1", "logical_key": "DEV-001:create_worktree",
+        "task_id": "DEV-001", "operation": "create_worktree", "operation_id": "GIT-001",
+        "controller_thread_id": "controller", "controller_host_id": "local", "controller_epoch": 1,
+        "attempt": 1, "status": "prepared", "request_path": "D:\\state\\request.json", "request_sha256": "a" * 64,
+        "receipt_path": None, "receipt_sha256": None, "resolution_evidence_path": None,
+        "resolution_evidence_sha256": None, "error": None, "created_at": "2026-09-16T00:00:00Z",
+        "completed_at": None, "failed_at": None, "cancelled_at": None,
+    },
     "e2e-run": {
         "workflow_id": "WF-E2E-001",
         "repository_root": "D:\\e2e",
@@ -95,4 +104,4 @@ except jsonschema.ValidationError:
 else:
     raise AssertionError("Object changed_files entry unexpectedly passed validation")
 
-print("SCHEMA VALID: 16 positive, 2 negative")
+print("SCHEMA VALID: 17 positive, 2 negative")

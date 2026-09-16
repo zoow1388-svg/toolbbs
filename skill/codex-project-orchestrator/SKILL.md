@@ -38,6 +38,8 @@ Use `scripts/controlled-git.ps1` only after explicit `git-approved` authorizatio
 - Merge only from a clean target branch at the exact recorded baseline. Require trusted tester and reviewer evidence whose receipt hashes bind to the exact source commit, and perform a conflict preflight before merging.
 - Never push, force, delete a branch/worktree, or resolve conflicts automatically. These remain separate user decisions.
 
+Before running any controlled Git request, register it with `manage-workflow.ps1 -Action begin-git-action`. Execute only the immutable request returned by the matching `controlled_git` action plan entry. After execution, use `complete-git-action` with the receipt. If execution fails, preserve raw evidence with `fail-git-action`; do not retry automatically. A prepared transaction after interruption is treated as possibly executed and must be reconciled from the repository and receipt before any cancellation or replacement attempt.
+
 For a real five-window acceptance, require one controller plus four distinct worker thread IDs. After all callbacks, trusted verifications, tests, and review complete, create a single evidence document and run `scripts/verify-five-window-e2e.ps1`. Do not claim real E2E success from simulated fixtures or unit tests.
 
 Before choosing an operational step, run `plan-next-actions.ps1` for the whole workflow. Validate the saved plan with `test-action-plan-current.ps1` immediately before executing any listed action. Regenerate it when the event sequence or state hashes change. The plan describes actions but never authorizes them.
